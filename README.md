@@ -4,6 +4,17 @@
 
 纯 Python + tkinter，单个 `app.py`，不装依赖也能跑（标准库足够）；可选接入 DeepSeek，效果更好。
 
+## 下载即用（Windows，无需装 Python）
+
+去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `闲鱼卖家神器_v2.0.0_win64.zip`：
+
+1. 解压得到 `闲鱼卖家神器` 文件夹
+2. 双击里面的 `闲鱼卖家神器.exe`
+3. 首次运行 Windows 可能弹 SmartScreen → 「更多信息」→「仍要运行」
+
+> 注意：整份文件夹要一起拷贝，只拿 exe 出来会因为缺少 `_internal` 而启动失败。
+> 本版是目录版（onedir）打包；单文件版在测试机上因临时目录受限打不开，故未放出。
+
 ![写文案](ui-copy.png)
 
 ## 三个页签，对应卖货的三个环节
