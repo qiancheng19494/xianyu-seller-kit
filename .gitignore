@@ -1,4 +1,4 @@
-# 本地配置（含 API Key，绝对不要提交）
+﻿# 本地配置（含 API Key，绝对不要提交）
 config.json
 
 # Python
@@ -11,10 +11,12 @@ build/
 build2/
 build3/
 build4/
+build5/
 dist/
 dist2/
 dist3/
 dist4/
+dist5/
 *.spec
 _build_libs/
 _wheels/

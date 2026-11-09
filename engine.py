@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "3.0.0"
+VERSION = "4.0.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -414,3 +414,106 @@ def check_text(title: str, body: str, category: str = "") -> dict:
         "title_len": len(t),
         "suggestions": list(dict.fromkeys(suggestions)),
     }
+
+
+# ---------------------------------------------------------------- 一键修复
+
+# 能安全替换的绝对化/夸大词（长词优先）
+REPAIR_MAP = {
+    "绝对正品": "正品", "百分百正品": "正品", "100%正品": "正品",
+    "保证满意": "尽量让你满意", "绝对可靠": "比较靠谱", "绝对放心": "可以放心",
+    "全网最低价": "价格实在", "全网最低": "价格实在", "最低价": "价格实在",
+    "最好": "不错", "第一": "靠前", "绝对": "比较", "百分百": "基本",
+    "100%": "基本", "永久": "长期", "万能": "通用", "保证": "尽量",
+    "包退包换": "有问题可协商", "假一赔十": "支持验货", "专柜正品": "正品渠道",
+    "内部渠道": "正规渠道", "官方": "正规",
+}
+
+# 命中就整句删掉（站外联系 / 先款 / 引流）
+DIRTY_WORDS = ["微信", "vx", "VX", "加我", "扫码", "二维码", "私聊加", "站外",
+               "先款", "直款", "转账", "支付宝", "花呗", "白条", "刷单", "返现"]
+
+_SENT_SPLIT = re.compile(r"(?<=[。！？!?；;\n])")
+
+# 这些词改了会歪曲事实，只能提示不能自动改
+_UNFIXABLE_WORDS = ["高仿", "精仿", "复刻", "原单", "尾单", "A货", "水货", "走私",
+                    "刷单", "好评返现", "破解", "外挂", "盗版", "代开"]
+
+
+def _sentences(text: str) -> list[str]:
+    return [s for s in _SENT_SPLIT.split(text or "") if s.strip()]
+
+
+def _dirty(sentence: str) -> bool:
+    low = (sentence or "").lower()
+    if any(w.lower() in low for w in DIRTY_WORDS):
+        return True
+    return any(p.search(sentence) for p, _ in CONTACT_PATTERNS)
+
+
+def repair_text(title: str, body: str) -> dict:
+    """按体检建议自动修：换绝对化词、删含站外联系/先款的句子。"""
+    t, b = (title or "").strip(), (body or "").strip()
+    changes: list[str] = []
+
+    for word, repl in sorted(REPAIR_MAP.items(), key=lambda kv: -len(kv[0])):
+        if word in t:
+            t = t.replace(word, repl)
+            changes.append(f"标题：{word} → {repl}")
+        if word in b:
+            b = b.replace(word, repl)
+            changes.append(f"正文：{word} → {repl}")
+
+    kept = []
+    for sent in _sentences(b):
+        if _dirty(sent):
+            changes.append("删掉一句：" + sent.strip().replace("\n", " ")[:22] + "…")
+            continue
+        kept.append(sent)
+    b = "".join(kept).strip()
+
+    if _dirty(t):
+        t = re.sub(r"1[3-9]\d{9}|(?:https?://|www\.)\S+|[\w.+-]+@[\w-]+\.[\w.]+", "", t)
+        t = re.sub(r"(微信|vx|VX|加我|扫码)\S{0,4}", "", t).strip(" ·｜,，")
+        changes.append("标题：去掉了联系方式")
+
+    left = list(dict.fromkeys(_hits(t + "\n" + b, _UNFIXABLE_WORDS)))
+    return {"title": t, "body": b,
+            "changes": list(dict.fromkeys(changes)), "left": left}
+
+
+# ---------------------------------------------------------------- 批量生成
+
+def parse_batch(text: str) -> list[dict]:
+    """每行：名称, 品类, 成色, 价格, 卖点, 风格（后三列可省）。"""
+    rows = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in re.split(r"[,，\t|]+", line)]
+        parts += [""] * (6 - len(parts))
+        name, cat, cond, price, points, style = parts[:6]
+
+        if cat not in CATEGORIES:
+            cat = next((k for k in CATEGORIES if cat and cat[:2] in k), "其他")
+        if cond not in CONDITIONS:
+            cond = next((k for k in CONDITIONS if cond and cond[:2] in k), list(CONDITIONS)[2])
+        if style not in STYLES:
+            style = STYLES[0]
+        if name:
+            rows.append({"name": name, "category": cat, "condition": cond,
+                         "price": price, "points": points, "style": style})
+    return rows
+
+
+def gen_batch(rows: list[dict]) -> list[dict]:
+    out = []
+    for r in rows:
+        c = gen_copy(r["name"], r["category"], r["condition"], r["points"],
+                     r.get("audience", ""), r["price"], r["style"])
+        chk = check_text(c["title"], c["body"], r["category"])
+        out.append(dict(r, title=c["title"], body=c["body"],
+                        tags=" ".join("#" + t for t in c["tags"]),
+                        score=chk["score"], grade=chk["grade"]))
+    return out

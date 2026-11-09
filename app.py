@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""闲鱼卖家神器 v3.0 — 写文案 / 定价格 / 回买家 / 发布体检 / 我的商品
+"""闲鱼卖家神器 v4.0 — 概览 / 写文案 / 定价格 / 回买家 / 发布体检 / 我的商品
 
-单文件 GUI（tkinter），零第三方依赖；文案与定价走本地引擎，填了 DeepSeek API Key
-可以额外用 AI 润色。数据存在本地 SQLite（我的商品 + 自定义话术）。
+tkinter GUI，零第三方依赖；文案、定价、体检、一键修复走本地引擎，填了 DeepSeek API Key
+还能额外用 AI 润色。数据存在本地 SQLite（商品库 + 自定义话术），支持浅色/深色主题。
 
 用法：
     python app.py            # 正常打开
-    python app.py --demo 1   # 自动填示例（1 写文案 / 2 定价 / 3 回买家 / 4 体检 / 5 商品库）
+    python app.py --demo 1   # 自动填示例（1 写文案 / 2 定价 / 3 回买家 / 4 体检 / 5 商品库 / 6 概览）
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from tkinter import filedialog, messagebox, ttk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import engine  # noqa: E402
 import store as store_mod  # noqa: E402
+import theme  # noqa: E402
 
 APP_NAME = "闲鱼卖家神器"
 BG = "#F5F6F8"
@@ -28,6 +29,10 @@ INK = "#1B1B1B"
 GREY = "#6B7280"
 CARD = "#FFFFFF"
 FONT = "Microsoft YaHei UI"
+
+# 页签下标（顺序改了记得同步这里）
+TAB_OVERVIEW, TAB_COPY, TAB_PRICE, TAB_REPLY, TAB_CHECK, TAB_MINE = range(6)
+
 
 DEMO = {
     1: dict(name="AirPods Pro 2 国行", category="数码/耳机", condition="九五新（用过几次）",
@@ -50,6 +55,14 @@ SAMPLE_PRODUCTS = [
          price="180", floor_price="120", status="已售"),
 ]
 
+TIPS_TEXT = """1. 图片一定要实拍，别用网图，闲鱼对盗图很敏感。
+2. 标题写清楚：品牌 + 型号 + 成色 + 卖点，30 字以内。
+3. 标价留 15% 砍价空间，底价自己心里有数就行。
+4. 别写微信 / 先款 / 转账，引导站外会被限流。
+5. 绝对化用词（最好、100%、全网最低）容易被判违规。
+6. 发货前拍打包视频，减少纠纷。
+7. 只走平台担保交易，对方要求先款的一律拒绝。"""
+
 
 # ---------------------------------------------------------------- 配置
 
@@ -60,9 +73,14 @@ def config_path() -> str:
 def load_config() -> dict:
     try:
         with open(config_path(), "r", encoding="utf-8") as fh:
-            return json.load(fh)
+            cfg = json.load(fh)
     except Exception:
-        return {"api_key": "", "base_url": "https://api.deepseek.com", "model": "deepseek-chat"}
+        cfg = {}
+    cfg.setdefault("api_key", "")
+    cfg.setdefault("base_url", "https://api.deepseek.com")
+    cfg.setdefault("model", "deepseek-chat")
+    cfg.setdefault("theme", "light")
+    return cfg
 
 
 def save_config(cfg: dict) -> None:
@@ -108,6 +126,10 @@ class App(tk.Tk):
         self.cfg = load_config()
         self.store = store_mod.Store()
         self.result = {}
+        self.theme_name = self.cfg.get("theme", "light")
+        self.checks_today = 0
+        self.last_grade = ""
+        self.last_score = None
 
         self._init_style()
         self._build_header()
@@ -115,6 +137,7 @@ class App(tk.Tk):
         self.nb = ttk.Notebook(self)
         self.nb.pack(fill="both", expand=True, padx=14, pady=(10, 0))
 
+        self._build_tab_overview()
         self._build_tab_copy()
         self._build_tab_price()
         self._build_tab_reply()
@@ -124,47 +147,81 @@ class App(tk.Tk):
         self._build_statusbar()
         self._refresh_reply_list()
         self._refresh_products()
+        self._refresh_overview()
+        self.apply_theme()
 
     # ------------------------------------------------------------ 外观
     def _init_style(self):
-        st = ttk.Style(self)
+        self.style = ttk.Style(self)
         try:
-            st.theme_use("clam")
+            self.style.theme_use("clam")
         except tk.TclError:
             pass
-        st.configure(".", background=BG, foreground=INK, font=(FONT, 10))
-        st.configure("TNotebook", background=BG, borderwidth=0)
-        st.configure("TNotebook.Tab", padding=(20, 9), font=(FONT, 10))
-        st.map("TNotebook.Tab", padding=[("selected", (20, 10))])
-        st.configure("Card.TFrame", background=CARD)
-        st.configure("Card.TLabel", background=CARD, foreground=INK)
-        st.configure("Hint.TLabel", background=CARD, foreground=GREY, font=(FONT, 9))
-        st.configure("H1.TLabel", background=CARD, foreground=INK, font=(FONT, 15, "bold"))
-        st.configure("H2.TLabel", background=CARD, foreground=INK, font=(FONT, 11, "bold"))
-        st.configure("Accent.TButton", background=YELLOW, foreground=INK, borderwidth=0,
-                     padding=(16, 8), font=(FONT, 10, "bold"))
-        st.map("Accent.TButton", background=[("active", "#FFE14D"), ("pressed", "#F2C800")])
-        st.configure("Ghost.TButton", background="#EFEFF2", foreground=INK, borderwidth=0,
-                     padding=(14, 7))
-        st.map("Ghost.TButton", background=[("active", "#E4E4EA")])
-        st.configure("Treeview", background=CARD, fieldbackground=CARD, rowheight=26,
-                     font=(FONT, 9))
-        st.configure("Treeview.Heading", font=(FONT, 9, "bold"))
+        theme.style_ttk(self.style, theme.palette(self.theme_name))
+
+    def apply_theme(self):
+        """切主题：ttk 走样式，tk 原生控件递归刷色，header 保持品牌黄。"""
+        pal = theme.palette(self.theme_name)
+        self.palette = pal
+        theme.style_ttk(self.style, pal)
+        self.configure(bg=pal["bg"])
+        self.statusbar.configure(bg=pal["bg"])
+        theme.recolor(self, pal, skip=[self.header, self.statusbar])
+        for w in self.statusbar.winfo_children():
+            w.configure(bg=pal["bg"], fg=pal["sub"])
+        if hasattr(self, "lbl_theme"):
+            self.lbl_theme.config(text="浅色" if self.theme_name == "dark" else "深色")
+        self._repaint_dynamic()
+
+    def _repaint_dynamic(self):
+        """重新上色那些颜色由内容决定的标签（评分、统计、状态）。"""
+        pal = self.palette
+        if hasattr(self, "lbl_tags"):
+            self.lbl_tags.config(bg=pal["card"], fg=pal["warn"])
+        if hasattr(self, "lbl_score"):
+            grade = getattr(self, "last_grade", "")
+            self.lbl_score.config(bg=pal["card"],
+                                  fg=theme.grade_color(grade, pal) if grade else pal["sub"])
+        if hasattr(self, "lbl_grade"):
+            self.lbl_grade.config(bg=pal["card"], fg=pal["sub"])
+        if hasattr(self, "lbl_stats"):
+            self.lbl_stats.configure(foreground=pal["sub"])
+        for box in getattr(self, "ov_boxes", []):
+            box.configure(bg=pal["card"], highlightbackground=pal["line"])
+        for card in getattr(self, "ov_values", []):
+            card.configure(bg=pal["card"], fg=pal["ink"])
+        for lbl in getattr(self, "ov_captions", []):
+            lbl.configure(bg=pal["card"], fg=pal["sub"])
+
+    def toggle_theme(self):
+        self.theme_name = "dark" if self.theme_name == "light" else "light"
+        self.cfg["theme"] = self.theme_name
+        save_config(self.cfg)
+        self.apply_theme()
+        self._refresh_overview()
+        self.set_status(f"已切换到{'深色' if self.theme_name == 'dark' else '浅色'}主题")
 
     def _build_header(self):
         bar = tk.Frame(self, bg=YELLOW, height=64)
         bar.pack(fill="x")
         bar.pack_propagate(False)
+        self.header = bar
         tk.Label(bar, text="闲鱼卖家神器", bg=YELLOW, fg=INK,
                  font=(FONT, 17, "bold")).pack(side="left", padx=(18, 10), pady=14)
-        tk.Label(bar, text="写文案 · 定价格 · 回买家 · 发布体检 · 商品库",
-                 bg=YELLOW, fg="#5A4A00", font=(FONT, 10)).pack(side="left", pady=18)
+        self.subtitle = tk.Label(bar, text="概览 · 写文案 · 定价格 · 回买家 · 体检 · 商品库",
+                                 bg=YELLOW, fg="#5A4A00", font=(FONT, 10))
+        self.subtitle.pack(side="left", pady=18)
         self.mode_label = tk.Label(bar, text="", bg=YELLOW, fg="#5A4A00", font=(FONT, 9))
         self.mode_label.pack(side="right", padx=(0, 8), pady=18)
+        self.lbl_theme = tk.Label(bar, text="深色", bg=YELLOW, fg=INK, font=(FONT, 10),
+                                  cursor="hand2")
+        self.lbl_theme.pack(side="right", padx=(0, 6))
+        self.lbl_theme.bind("<Button-1>", lambda e: self.toggle_theme())
         tk.Button(bar, text="设置", command=self.open_settings, bg=YELLOW, fg=INK,
                   activebackground="#FFE14D", relief="flat", bd=0, cursor="hand2",
                   font=(FONT, 10)).pack(side="right", padx=12)
         self._update_mode_label()
+
 
     def _update_mode_label(self):
         has_key = bool(self.cfg.get("api_key"))
@@ -173,9 +230,85 @@ class App(tk.Tk):
     def _build_statusbar(self):
         bar = tk.Frame(self, bg=BG)
         bar.pack(fill="x", side="bottom")
+        self.statusbar = bar
         self.status = tk.StringVar(value=f"数据库：{self.store.path}")
         tk.Label(bar, textvariable=self.status, bg=BG, fg=GREY,
                  font=(FONT, 9)).pack(side="left", padx=16, pady=6)
+
+    # ------------------------------------------------------------ 页签 0：概览
+    def _build_tab_overview(self):
+        page = ttk.Frame(self.nb, padding=0)
+        self.nb.add(page, text="概览")
+
+        wrap = ttk.Frame(page, padding=(0, 12))
+        wrap.pack(fill="both", expand=True)
+
+        top = self.card(wrap)
+        top.pack(fill="x")
+        ttk.Label(top, text="今天想卖点什么？", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(top, text="四个数字先看一眼，再决定写文案还是体检。",
+                  style="Hint.TLabel").pack(anchor="w", pady=(2, 14))
+
+        cards = ttk.Frame(top, style="Card.TFrame")
+        cards.pack(fill="x")
+        self.ov_values, self.ov_captions, self.ov_boxes = [], [], []
+        for idx, (cap, _key) in enumerate((("在售商品", "on_sale"), ("已售金额", "sold_amount"),
+                                           ("累计商品", "total"), ("今日体检", "checks"))):
+            box = tk.Frame(cards, bg=CARD, highlightthickness=1, highlightbackground="#EDEDF0")
+            box.pack(side="left", fill="both", expand=True, padx=(0 if idx == 0 else 10, 0))
+            val = tk.Label(box, text="0", bg=CARD, fg=INK, font=(FONT, 22, "bold"))
+            val.pack(anchor="w", padx=14, pady=(12, 0))
+            cap_lbl = tk.Label(box, text=cap, bg=CARD, fg=GREY, font=(FONT, 9))
+            cap_lbl.pack(anchor="w", padx=14, pady=(0, 12))
+            self.ov_values.append(val)
+            self.ov_captions.append(cap_lbl)
+            self.ov_boxes.append(box)
+
+        quick = ttk.Frame(top, style="Card.TFrame")
+        quick.pack(fill="x", pady=(16, 0))
+        for text, tab, style_name in (("写一条新文案", TAB_COPY, "Accent.TButton"),
+                                      ("给文案做体检", TAB_CHECK, "Ghost.TButton"),
+                                      ("看看我的商品", TAB_MINE, "Ghost.TButton"),
+                                      ("批量生成", None, "Ghost.TButton")):
+            cmd = (lambda t=tab: self.nb.select(t)) if tab is not None else self.open_batch
+            ttk.Button(quick, text=text, style=style_name, command=cmd).pack(side="left", padx=(0, 8))
+
+        bottom = ttk.Frame(wrap, padding=(0, 12))
+        bottom.pack(fill="both", expand=True)
+        recent = self.card(bottom)
+        recent.pack(side="left", fill="both", expand=True, padx=(0, 12))
+        tips = self.card(bottom)
+        tips.pack(side="left", fill="both", expand=True)
+
+        ttk.Label(recent, text="最近保存的商品", style="H2.TLabel").pack(anchor="w")
+        cols = ("name", "price", "status", "updated")
+        self.tv_recent = ttk.Treeview(recent, columns=cols, show="headings", height=8)
+        for c, t, w in (("name", "名称", 200), ("price", "价格", 80),
+                        ("status", "状态", 70), ("updated", "更新时间", 140)):
+            self.tv_recent.heading(c, text=t)
+            self.tv_recent.column(c, width=w, anchor="w")
+        self.tv_recent.pack(fill="both", expand=True, pady=(8, 0))
+
+        ttk.Label(tips, text="发布前顺手过一遍", style="H2.TLabel").pack(anchor="w")
+        self.ov_tips = tk.Text(tips, height=9, font=(FONT, 9), wrap="word", relief="flat",
+                               bg="#FAFAFB", highlightthickness=0)
+        self.ov_tips.pack(fill="both", expand=True, pady=(8, 0))
+        self.ov_tips.insert("1.0", TIPS_TEXT)
+        self.ov_tips.config(state="disabled")
+
+    def _refresh_overview(self):
+        if not hasattr(self, "tv_recent"):
+            return
+        s = self.store.stats()
+        vals = (str(s.get("on_sale", 0)), f"¥{s.get('sold_amount', 0):.0f}",
+                str(s.get("total", 0)), str(getattr(self, "checks_today", 0)))
+        for lbl, text in zip(self.ov_values, vals):
+            lbl.config(text=text)
+        self.tv_recent.delete(*self.tv_recent.get_children())
+        for r in self.store.list_products()[:8]:
+            self.tv_recent.insert("", "end", values=(r["name"], r["price"], r["status"],
+                                                     (r["updated_at"] or "")[5:16]))
+
 
     def set_status(self, text: str):
         self.status.set(text)
@@ -239,6 +372,8 @@ class App(tk.Tk):
                    command=self.do_generate).pack(side="left")
         ttk.Button(btns, text="清空", style="Ghost.TButton",
                    command=self.do_clear).pack(side="left", padx=8)
+        ttk.Button(btns, text="批量生成", style="Ghost.TButton",
+                   command=self.open_batch).pack(side="left", padx=8)
         ttk.Button(btns, text="保存到商品库", style="Ghost.TButton",
                    command=self.save_current).pack(side="left")
         self.lbl_copy_status = ttk.Label(left, text="", style="Hint.TLabel")
@@ -393,8 +528,10 @@ class App(tk.Tk):
         bar.pack(fill="x", pady=(10, 0))
         ttk.Button(bar, text="开始体检", style="Accent.TButton",
                    command=self.do_check).pack(side="left")
+        ttk.Button(bar, text="一键修复", style="Ghost.TButton",
+                   command=self.do_repair).pack(side="left", padx=8)
         ttk.Button(bar, text="从「写文案」带入", style="Ghost.TButton",
-                   command=self.pull_from_copy).pack(side="left", padx=8)
+                   command=self.pull_from_copy).pack(side="left")
 
         ttk.Label(right, text="体检结果", style="H1.TLabel").pack(anchor="w")
         self.lbl_score = tk.Label(right, text="—", bg=CARD, fg=INK, font=(FONT, 30, "bold"))
@@ -551,7 +688,7 @@ class App(tk.Tk):
             tags=self.lbl_tags.cget("text"), status="在售"))
         self._refresh_products()
         self.lbl_copy_status.config(text=f"已保存到商品库（#{pid}）")
-        self.nb.select(4)
+        self.nb.select(TAB_MINE)
 
     # ------------------------------------------------------------ 动作：定价
     def do_price(self):
@@ -664,13 +801,15 @@ class App(tk.Tk):
 
     def send_to_check(self):
         self.pull_from_copy()
-        self.nb.select(3)
+        self.nb.select(TAB_CHECK)
 
     def do_check(self):
         res = engine.check_text(self.v_chk_title.get(), self.t_chk_body.get("1.0", "end"),
                                 self.v_category.get())
-        color = {"优": "#15803D", "良": "#0E7490", "待改": "#B45309", "有风险": "#B91C1C"}
-        self.lbl_score.config(text=f"{res['score']} 分", fg=color.get(res["grade"], INK))
+        self.last_grade = res["grade"]
+        self.last_score = res["score"]
+        self.lbl_score.config(text=f"{res['score']} 分",
+                              fg=theme.grade_color(res["grade"], self.palette))
         self.lbl_grade.config(text=f"{res['grade']}　标题 {res['title_len']} 字　"
                                    f"问题 {len(res['issues'])} 条")
         self.tv_issue.delete(*self.tv_issue.get_children())
@@ -679,7 +818,42 @@ class App(tk.Tk):
             self.tv_issue.insert("", "end", values=(level, item["word"], item["msg"]))
         self.t_advice.delete("1.0", "end")
         self.t_advice.insert("1.0", "\n".join("· " + s for s in res["suggestions"]))
+        self.checks_today = getattr(self, "checks_today", 0) + 1
         self.set_status(f"体检完成：{res['score']} 分（{res['grade']}）")
+
+    def do_repair(self):
+        """一键修复：换绝对化词、删站外句子，修完自动复检并对比分数。"""
+        title = self.v_chk_title.get()
+        body = self.t_chk_body.get("1.0", "end")
+        before = engine.check_text(title, body, self.v_category.get())
+        fixed = engine.repair_text(title, body)
+
+        if not fixed["changes"]:
+            messagebox.showinfo(APP_NAME, "没找到能自动改的地方，按建议手动改改看。")
+            return
+
+        self.v_chk_title.set(fixed["title"])
+        self.t_chk_body.delete("1.0", "end")
+        self.t_chk_body.insert("1.0", fixed["body"])
+        after = engine.check_text(fixed["title"], fixed["body"], self.v_category.get())
+
+        self.last_grade, self.last_score = after["grade"], after["score"]
+        self.lbl_score.config(text=f"{before['score']} → {after['score']}",
+                              fg=theme.grade_color(after["grade"], self.palette))
+        self.lbl_grade.config(text=f"{after['grade']}　已修 {len(fixed['changes'])} 处"
+                                   + (f"　仍需手动处理 {len(fixed['left'])} 个词" if fixed["left"] else ""))
+        self.tv_issue.delete(*self.tv_issue.get_children())
+        for item in after["issues"]:
+            level = {"high": "高", "mid": "中", "low": "低"}.get(item["level"], item["level"])
+            self.tv_issue.insert("", "end", values=(level, item["word"], item["msg"]))
+        self.t_advice.delete("1.0", "end")
+        lines = ["【改了什么】"] + ["· " + c for c in fixed["changes"]]
+        if fixed["left"]:
+            lines += ["", "【改不了，要你手动】"] + ["· " + w for w in fixed["left"]]
+        lines += ["", "【还可以再改】"] + ["· " + s for s in after["suggestions"]]
+        self.t_advice.insert("1.0", "\n".join(lines))
+        self.set_status(f"已修复 {len(fixed['changes'])} 处：{before['score']} → {after['score']} 分")
+
 
     # ------------------------------------------------------------ 动作：商品库
     def _refresh_products(self):
@@ -722,7 +896,7 @@ class App(tk.Tk):
         self.t_body.delete("1.0", "end")
         self.t_body.insert("1.0", r["body"])
         self.lbl_tags.config(text=r["tags"])
-        self.nb.select(0)
+        self.nb.select(TAB_COPY)
         self.set_status(f"已载入商品 #{pid}")
 
     def set_product_status(self, status: str):
@@ -749,6 +923,72 @@ class App(tk.Tk):
             return
         n = self.store.export_csv(path)
         self.set_status(f"已导出 {n} 条到 {path}")
+
+    # ------------------------------------------------------------ 批量生成
+    def open_batch(self):
+        pal = self.palette
+        win = tk.Toplevel(self)
+        win.title("批量生成")
+        win.geometry("1000x640")
+        win.configure(bg=pal["bg"])
+
+        wrap = ttk.Frame(win, padding=14)
+        wrap.pack(fill="both", expand=True)
+        left = self.card(wrap)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 12))
+        right = self.card(wrap)
+        right.pack(side="left", fill="both", expand=True)
+
+        ttk.Label(left, text="一行一个商品", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(left, text="格式：名称, 品类, 成色, 价格, 卖点, 风格（后三列可省）",
+                  style="Hint.TLabel").pack(anchor="w", pady=(2, 8))
+        t_in = tk.Text(left, height=16, font=(FONT, 9), wrap="word", relief="flat",
+                       bg=pal["input"], fg=pal["ink"], insertbackground=pal["ink"],
+                       highlightthickness=1, highlightbackground=pal["line"])
+        t_in.pack(fill="both", expand=True)
+        t_in.insert("1.0", "AirPods Pro 2, 数码/耳机, 九五新, 899, 降噪强、续航好\n"
+                           "Kindle Paperwhite 4, 数码, 九成新, 320, 看书神器、送保护套\n"
+                           "宜家书桌 120cm, 家居/日用, 八成新, 180, 实木、可拆")
+
+        ttk.Label(right, text="生成结果", style="H1.TLabel").pack(anchor="w")
+        t_out = tk.Text(right, height=16, font=(FONT, 9), wrap="word", relief="flat",
+                        bg=pal["input"], fg=pal["ink"],
+                        highlightthickness=1, highlightbackground=pal["line"])
+        t_out.pack(fill="both", expand=True, pady=(8, 0))
+
+        state = {"rows": []}
+
+        def generate():
+            rows = engine.parse_batch(t_in.get("1.0", "end"))
+            if not rows:
+                messagebox.showinfo(APP_NAME, "没解析到商品，检查一下每行格式。")
+                return
+            out = engine.gen_batch(rows)
+            state["rows"] = out
+            t_out.delete("1.0", "end")
+            for i, r in enumerate(out, 1):
+                t_out.insert("end", f"{i}. {r['title']}　[{r['score']} 分 {r['grade']}]\n")
+                t_out.insert("end", r["body"] + "\n\n")
+            win_status = f"生成 {len(out)} 条"
+            self.set_status("批量生成：" + win_status)
+
+        def save_all():
+            if not state["rows"]:
+                messagebox.showinfo(APP_NAME, "先点「生成」。")
+                return
+            for r in state["rows"]:
+                self.store.save_product(dict(r, floor_price="", status="草稿"))
+            self._refresh_products()
+            self._refresh_overview()
+            self.set_status(f"批量保存 {len(state['rows'])} 条到商品库（状态：草稿）")
+            win.destroy()
+
+        bar = ttk.Frame(win, padding=(14, 0, 14, 14))
+        bar.pack(fill="x")
+        ttk.Button(bar, text="生成", style="Accent.TButton", command=generate).pack(side="left")
+        ttk.Button(bar, text="全部存到商品库", style="Ghost.TButton",
+                   command=save_all).pack(side="left", padx=8)
+        ttk.Button(bar, text="关闭", style="Ghost.TButton", command=win.destroy).pack(side="right")
 
     # ------------------------------------------------------------ 设置
     def open_settings(self):
@@ -790,14 +1030,14 @@ class App(tk.Tk):
             self.v_audience.set(d["audience"]); self.v_style.set(d["style"])
             self.t_points.delete("1.0", "end"); self.t_points.insert("1.0", d["points"])
             self.do_generate()
-            self.nb.select(0)
+            self.nb.select(TAB_COPY)
         elif idx == 2:
             d = DEMO[2]
             self.v_orig.set(d["price"]); self.v_cat2.set(d["category"]); self.v_cond2.set(d["condition"])
-            self.do_price(); self.nb.select(1)
+            self.do_price(); self.nb.select(TAB_PRICE)
         elif idx == 3:
             d = DEMO[3]
-            self.v_floor.set(d["floor"]); self.nb.select(2)
+            self.v_floor.set(d["floor"]); self.nb.select(TAB_REPLY)
             self.lb_q.selection_clear(0, "end"); self.lb_q.selection_set(0)
             self.do_reply()
         elif idx == 4:
@@ -806,7 +1046,7 @@ class App(tk.Tk):
             self.t_chk_body.delete("1.0", "end")
             self.t_chk_body.insert("1.0", "自用闲置，功能一切正常。可以加微信聊，支持先款；"
                                         "全网最低价，绝对正品，保证满意。")
-            self.do_check(); self.nb.select(3)
+            self.do_check(); self.nb.select(TAB_CHECK)
         elif idx == 5:
             if not self.store.list_products():
                 for p in SAMPLE_PRODUCTS:
@@ -814,7 +1054,37 @@ class App(tk.Tk):
                                         p["audience"], p["price"], p["style"])
                     self.store.save_product(dict(p, title=c["title"], body=c["body"],
                                                  tags=" ".join("#" + t for t in c["tags"])))
-            self._refresh_products(); self.nb.select(4)
+            self._refresh_products(); self.nb.select(TAB_MINE)
+        elif idx == 6:
+            self._refresh_overview(); self.nb.select(TAB_OVERVIEW)
+        elif idx == 7:
+            self.toggle_theme(); self.nb.select(TAB_OVERVIEW)
+        elif idx == 8:
+            self.v_chk_title.set("AirPods Pro 2 国行｜九五新｜自用闲置")
+            self.t_chk_body.delete("1.0", "end")
+            self.t_chk_body.insert("1.0", "自用闲置，功能一切正常。可以加微信聊，支持先款；"
+                                        "全网最低价，绝对正品，保证满意。")
+            self.do_check()
+            self.do_repair()
+            self.nb.select(TAB_CHECK)
+        elif idx == 14:
+            self.theme_name = "light"; self.apply_theme()
+            self.run_demo(8)
+        elif idx == 13:
+            self.theme_name = "dark"; self.apply_theme()
+            self.run_demo(5)
+        elif idx == 12:
+            self.theme_name = "light"; self.apply_theme()
+            self.open_batch()
+        elif idx == 10:
+            self.theme_name = "light"; self.apply_theme(); self._refresh_overview()
+            self.nb.select(TAB_OVERVIEW)
+        elif idx == 11:
+            self.theme_name = "dark"; self.apply_theme(); self._refresh_overview()
+            self.nb.select(TAB_OVERVIEW)
+        elif idx == 9:
+            self.toggle_theme()
+            self.run_demo(1)
 
 
 def main():
