@@ -1,4 +1,4 @@
-# 闲鱼卖家神器 v2.0
+﻿# 闲鱼卖家神器 v2.0
 
 > 写文案、定价、回买家——闲鱼卖家的三件套，一个桌面小工具全搞定。
 
@@ -6,7 +6,7 @@
 
 ## 下载即用（Windows，无需装 Python）
 
-去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `闲鱼卖家神器_v2.0.0_win64.zip`：
+去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v2.0.0_win64.zip`：
 
 1. 解压得到 `闲鱼卖家神器` 文件夹
 2. 双击里面的 `闲鱼卖家神器.exe`
