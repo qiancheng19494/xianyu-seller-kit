@@ -9,8 +9,12 @@ __pycache__/
 # 打包产物
 build/
 build2/
+build3/
+build4/
 dist/
 dist2/
+dist3/
+dist4/
 *.spec
 _build_libs/
 _wheels/
@@ -23,10 +27,14 @@ tmptest-*/
 pyt/
 subtest/
 
+# 本地数据库（我的商品）
+data/
+
 # 调试截图与临时文件
 chrome-shot.png
 demo.png
 ui1.png
+ui-d*.png
 *.zip
 *.log
 
