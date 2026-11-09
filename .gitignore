@@ -1,0 +1,42 @@
+# 本地配置（含 API Key，绝对不要提交）
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 打包产物
+build/
+build2/
+dist/
+dist2/
+*.spec
+_build_libs/
+_wheels/
+_pipcache/
+_pip_tmp/
+_tmp/
+pip-*/
+modetest-*/
+tmptest-*/
+pyt/
+subtest/
+
+# 调试截图与临时文件
+chrome-shot.png
+demo.png
+ui1.png
+*.zip
+*.log
+
+# 开发期自动化脚本（不属于产品）
+chrome-max.ps1
+click-at.ps1
+click-ext.ps1
+shot-app.ps1
+shot-chrome.ps1
+shot-win.ps1
+demo_shot.py
+pipwrap.py
+pyiwrap.py
