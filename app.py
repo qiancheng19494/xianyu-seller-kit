@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""闲鱼卖家神器 v4.0 — 概览 / 写文案 / 定价格 / 回买家 / 发布体检 / 我的商品
+"""闲鱼卖家神器 v4.1 — 概览 / 写文案 / 定价格 / 回买家 / 发布体检 / 我的商品
 
 tkinter GUI，零第三方依赖；文案、定价、体检、一键修复走本地引擎，填了 DeepSeek API Key
 还能额外用 AI 润色。数据存在本地 SQLite（商品库 + 自定义话术），支持浅色/深色主题。
@@ -15,7 +15,7 @@ import os
 import sys
 import tkinter as tk
 import urllib.request
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import engine  # noqa: E402
@@ -555,10 +555,15 @@ class App(tk.Tk):
     def _build_tab_mine(self):
         page = ttk.Frame(self.nb, padding=0)
         self.nb.add(page, text="我的商品")
-        box = self.card(page, padding=16)
-        box.pack(fill="both", expand=True, pady=12)
 
-        top = ttk.Frame(box, style="Card.TFrame")
+        outer = ttk.Frame(page)
+        outer.pack(fill="both", expand=True, pady=12)
+
+        # ---- 左：列表
+        left = self.card(outer, padding=16)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 12))
+
+        top = ttk.Frame(left, style="Card.TFrame")
         top.pack(fill="x")
         ttk.Label(top, text="我的商品", style="H1.TLabel").pack(side="left")
         ttk.Button(top, text="导出 CSV", style="Ghost.TButton",
@@ -566,37 +571,89 @@ class App(tk.Tk):
         ttk.Button(top, text="刷新", style="Ghost.TButton",
                    command=self._refresh_products).pack(side="right")
 
-        filter_bar = ttk.Frame(box, style="Card.TFrame")
+        filter_bar = ttk.Frame(left, style="Card.TFrame")
         filter_bar.pack(fill="x", pady=(10, 8))
         self.v_filter = tk.StringVar(value="全部")
         ttk.Combobox(filter_bar, textvariable=self.v_filter, values=["全部"] + store_mod.STATUSES,
-                     state="readonly", width=10).pack(side="left")
+                     state="readonly", width=8).pack(side="left")
         self.v_keyword = tk.StringVar()
-        ttk.Entry(filter_bar, textvariable=self.v_keyword, width=24).pack(side="left", padx=8)
+        ttk.Entry(filter_bar, textvariable=self.v_keyword, width=16).pack(side="left", padx=8)
         ttk.Button(filter_bar, text="搜索", style="Ghost.TButton",
                    command=self._refresh_products).pack(side="left")
-        self.lbl_stats = ttk.Label(filter_bar, text="", style="Hint.TLabel")
-        self.lbl_stats.pack(side="right")
 
-        cols = ("id", "name", "price", "status", "updated", "title")
-        self.tv_prod = ttk.Treeview(box, columns=cols, show="headings")
-        for c, t, w in (("id", "ID", 46), ("name", "名称", 220), ("price", "价格", 80),
-                        ("status", "状态", 70), ("updated", "更新时间", 130), ("title", "标题", 380)):
+        cols = ("id", "name", "price", "status", "days", "images", "updated")
+        self.tv_prod = ttk.Treeview(left, columns=cols, show="headings")
+        for c, t, w, a in (("id", "ID", 42, "center"), ("name", "名称", 170, "w"),
+                           ("price", "价格", 70, "center"), ("status", "状态", 62, "center"),
+                           ("days", "在售天", 62, "center"), ("images", "图", 40, "center"),
+                           ("updated", "更新时间", 128, "w")):
             self.tv_prod.heading(c, text=t)
-            self.tv_prod.column(c, width=w, anchor="w")
+            self.tv_prod.column(c, width=w, anchor=a)
         self.tv_prod.pack(fill="both", expand=True)
+        self.tv_prod.bind("<<TreeviewSelect>>", lambda e: self._show_detail())
         self.tv_prod.bind("<Double-1>", lambda e: self.load_product())
 
-        bar = ttk.Frame(box, style="Card.TFrame")
-        bar.pack(fill="x", pady=(10, 0))
-        ttk.Button(bar, text="载入到写文案", style="Accent.TButton",
-                   command=self.load_product).pack(side="left")
-        ttk.Button(bar, text="标记已售", style="Ghost.TButton",
-                   command=lambda: self.set_product_status("已售")).pack(side="left", padx=8)
-        ttk.Button(bar, text="标记在售", style="Ghost.TButton",
-                   command=lambda: self.set_product_status("在售")).pack(side="left")
-        ttk.Button(bar, text="删除", style="Ghost.TButton",
-                   command=self.delete_product).pack(side="right")
+        self.lbl_stats = ttk.Label(left, text="", style="Hint.TLabel")
+        self.lbl_stats.pack(fill="x", pady=(8, 0))
+
+        # ---- 右：详情（图片 + 时间线）
+        right = self.card(outer, padding=16)
+        right.pack(side="right", fill="y")
+        right.configure(width=404)
+        right.pack_propagate(False)
+
+        ttk.Label(right, text="商品详情", style="H1.TLabel").pack(anchor="w")
+        self.lbl_det_name = ttk.Label(right, text="在左边选一个商品", style="Card.TLabel",
+                                      font=(FONT, 12, "bold"), wraplength=360, justify="left")
+        self.lbl_det_name.pack(anchor="w", pady=(8, 2))
+        self.lbl_det_meta = ttk.Label(right, text="", style="Hint.TLabel",
+                                      wraplength=360, justify="left")
+        self.lbl_det_meta.pack(anchor="w")
+        self.lbl_det_days = ttk.Label(right, text="", style="Hint.TLabel")
+        self.lbl_det_days.pack(anchor="w", pady=(2, 8))
+
+        self.lbl_img_head = ttk.Label(right, text="配图（0）", style="H2.TLabel")
+        self.lbl_img_head.pack(anchor="w")
+        self.thumb_holder = ttk.Frame(right, style="Card.TFrame")
+        self.thumb_holder.pack(fill="x", pady=(6, 4))
+        self.lbl_noimg = ttk.Label(right, text="还没有配图，点「添加图片」挑几张实拍图。",
+                                   style="Hint.TLabel", wraplength=360, justify="left")
+        self.lbl_noimg.pack(anchor="w")
+
+        img_bar = ttk.Frame(right, style="Card.TFrame")
+        img_bar.pack(fill="x", pady=(4, 10))
+        ttk.Button(img_bar, text="添加图片", style="Ghost.TButton",
+                   command=self.add_images).pack(side="left")
+        ttk.Button(img_bar, text="打开第一张", style="Ghost.TButton",
+                   command=self.open_first_image).pack(side="left", padx=8)
+
+        self.lbl_time_head = ttk.Label(right, text="上架时间线", style="H2.TLabel")
+        self.lbl_time_head.pack(anchor="w")
+        self.tv_time = ttk.Treeview(right, columns=("at", "kind", "note"), show="headings", height=7)
+        for c, t, w, a in (("at", "时间", 108, "w"), ("kind", "动作", 56, "center"),
+                           ("note", "说明", 200, "w")):
+            self.tv_time.heading(c, text=t)
+            self.tv_time.column(c, width=w, anchor=a)
+        self.tv_time.pack(fill="both", expand=True, pady=(6, 6))
+
+        act = ttk.Frame(right, style="Card.TFrame")
+        act.pack(fill="x")
+        ttk.Button(act, text="记一笔", style="Ghost.TButton",
+                   command=self.add_note).pack(side="left")
+        ttk.Button(act, text="标记在售", style="Ghost.TButton",
+                   command=lambda: self.set_product_status("在售")).pack(side="left", padx=6)
+        ttk.Button(act, text="标记已售", style="Ghost.TButton",
+                   command=lambda: self.set_product_status("已售")).pack(side="left")
+
+        act2 = ttk.Frame(right, style="Card.TFrame")
+        act2.pack(fill="x", pady=(8, 0))
+        ttk.Button(act2, text="载入到写文案", style="Accent.TButton",
+                   command=self.load_product).pack(side="left", fill="x", expand=True)
+        ttk.Button(act2, text="删除", style="Ghost.TButton",
+                   command=self.delete_product).pack(side="right", padx=(8, 0))
+
+        self._thumbs: list = []
+        self._detail_pid = None
 
     # ------------------------------------------------------------ 动作：写文案
     def do_generate(self):
@@ -862,11 +919,18 @@ class App(tk.Tk):
         rows = self.store.list_products(self.v_filter.get(), self.v_keyword.get().strip())
         self.tv_prod.delete(*self.tv_prod.get_children())
         for r in rows:
+            d = self.store.days_on_sale(r["id"])
+            n_img = len(self.store.list_images(r["id"]))
             self.tv_prod.insert("", "end", values=(r["id"], r["name"], r["price"], r["status"],
-                                                   r["updated_at"], r["title"]))
+                                                   d if d is not None else "-", n_img,
+                                                   r["updated_at"]))
         st = self.store.stats()
-        self.lbl_stats.config(text=f"在售 {st['on_sale']} · 已售 {st['sold']}（¥{st['sold_amount']:.0f}）"
-                                   f" · 共 {st['total']}")
+        self.lbl_stats.config(
+            text=f"在售 {st['on_sale']} · 已售 {st['sold']}（¥{st['sold_amount']:.0f}）"
+                 f" · 共 {st['total']} 件 · 图片 {st['images']} 张"
+                 + (f" · 最久在售 {st['oldest_days']} 天" if st["oldest_days"] else ""))
+        if hasattr(self, "_show_detail"):
+            self._show_detail()
 
     def _selected_product(self):
         sel = self.tv_prod.selection()
@@ -905,14 +969,16 @@ class App(tk.Tk):
             return
         self.store.set_status(pid, status)
         self._refresh_products()
+        self._show_detail()
         self.set_status(f"#{pid} 已标记为{status}")
 
     def delete_product(self):
         pid = self._selected_product()
         if not pid:
             return
-        if messagebox.askyesno(APP_NAME, f"确定删除商品 #{pid}？"):
+        if messagebox.askyesno(APP_NAME, f"确定删除商品 #{pid}？（配图记录与时间线一起删，硬盘文件不动）"):
             self.store.delete_product(pid)
+            self._detail_pid = None
             self._refresh_products()
             self.set_status(f"已删除 #{pid}")
 
@@ -923,6 +989,163 @@ class App(tk.Tk):
             return
         n = self.store.export_csv(path)
         self.set_status(f"已导出 {n} 条到 {path}")
+
+    # ------------------------------------------------------------ 详情：图片与时间线
+    def _photo(self, path: str, size: int = 84):
+        """尽量做缩略图：先试 Pillow（支持 jpg/webp），退回 tkinter 原生（png/gif）。"""
+        try:
+            from PIL import Image, ImageTk  # type: ignore
+            im = Image.open(path)
+            im.thumbnail((size, size))
+            return ImageTk.PhotoImage(im)
+        except Exception:
+            pass
+        try:
+            img = tk.PhotoImage(file=path)
+            k = max(1, int(max(img.width(), img.height()) / size))
+            return img.subsample(k, k) if k > 1 else img
+        except Exception:
+            return None
+
+    def _refresh_thumbs(self, imgs):
+        for w in self.thumb_holder.winfo_children():
+            w.destroy()
+        self._thumbs = []
+        if not imgs:
+            self.lbl_noimg.pack(anchor="w")
+            return
+        self.lbl_noimg.pack_forget()
+        for i, im in enumerate(imgs[:8]):
+            box = ttk.Frame(self.thumb_holder, style="Card.TFrame")
+            box.grid(row=i // 4, column=i % 4, padx=3, pady=3, sticky="nw")
+            ph = self._photo(im["path"])
+            if ph:
+                lbl = tk.Label(box, image=ph, bd=0, bg=self.palette["card"], cursor="hand2")
+                lbl.pack()
+                lbl.bind("<Button-1>", lambda e, p=im["path"]: self._open_path(p))
+                lbl.bind("<Button-3>", lambda e, iid=im["id"]: self._del_image(iid))
+                self._thumbs.append(ph)
+            else:
+                ext = (os.path.splitext(im["path"])[1] or "?")[1:].upper()
+                ttk.Label(box, text=ext or "文件", style="Hint.TLabel",
+                          width=8, anchor="center").pack(ipady=22)
+
+    def _open_path(self, path: str):
+        try:
+            os.startfile(path)  # noqa: S606  (Windows 打开文件)
+        except Exception as exc:
+            messagebox.showwarning(APP_NAME, f"打不开：{exc}")
+
+    def _del_image(self, image_id: int):
+        if messagebox.askyesno(APP_NAME, "把这行图片记录移出商品？（不会删你硬盘上的文件）"):
+            self.store.delete_image(image_id)
+            self._show_detail()
+            self._refresh_products()
+
+    def _show_detail(self):
+        if not hasattr(self, "lbl_det_name"):
+            return
+        sel = self.tv_prod.selection() if hasattr(self, "tv_prod") else ()
+        if not sel:
+            self._detail_pid = None
+            self.lbl_det_name.config(text="在左边选一个商品")
+            self.lbl_det_meta.config(text="")
+            self.lbl_det_days.config(text="")
+            self.lbl_img_head.config(text="配图（0）")
+            self._refresh_thumbs([])
+            self.tv_time.delete(*self.tv_time.get_children())
+            return
+
+        pid = int(self.tv_prod.item(sel[0], "values")[0])
+        self._detail_pid = pid
+        r = self.store.get_product(pid)
+        if not r:
+            return
+        self.lbl_det_name.config(text=r["name"])
+        meta = " · ".join(x for x in [r["category"], r["condition"],
+                                      (f"¥{r['price']}" if r["price"] else ""),
+                                      r["status"]] if x)
+        self.lbl_det_meta.config(text=meta)
+        d = self.store.days_on_sale(pid)
+        self.lbl_det_days.config(
+            text=(f"在售 {d} 天" if d is not None else "") + f"　更新于 {r['updated_at']}")
+
+        imgs = self.store.list_images(pid)
+        self.lbl_img_head.config(text=f"配图（{len(imgs)}）")
+        self._refresh_thumbs(imgs)
+
+        self.tv_time.delete(*self.tv_time.get_children())
+        for e in self.store.list_events(pid):
+            self.tv_time.insert("", "end", values=(e["at"], e["kind"], e["note"]))
+
+    def add_images(self):
+        if not self._detail_pid:
+            messagebox.showinfo(APP_NAME, "先在列表里选一个商品。")
+            return
+        paths = filedialog.askopenfilenames(
+            title="选择实拍图（可以多选）",
+            filetypes=[("图片", "*.png *.jpg *.jpeg *.gif *.bmp *.webp"), ("所有文件", "*.*")])
+        if not paths:
+            return
+        for p in paths:
+            self.store.add_image(self._detail_pid, p)
+        self._show_detail()
+        self._refresh_products()
+        self.set_status(f"已添加 {len(paths)} 张图")
+
+    def open_first_image(self):
+        if not self._detail_pid:
+            return
+        imgs = self.store.list_images(self._detail_pid)
+        if not imgs:
+            messagebox.showinfo(APP_NAME, "这个商品还没有配图。")
+            return
+        self._open_path(imgs[0]["path"])
+
+    def add_note(self):
+        if not self._detail_pid:
+            messagebox.showinfo(APP_NAME, "先在列表里选一个商品。")
+            return
+        text = simpledialog.askstring(APP_NAME, "记一笔（比如：买家问能不能包邮）", parent=self)
+        if not text:
+            return
+        self.store.add_event(self._detail_pid, "备注", text.strip())
+        self._show_detail()
+        self.set_status("已记一笔")
+
+
+    def _make_demo_images(self, pid):
+        """给演示商品造两张占位实拍图（有 Pillow 用 JPG，没有就退 PNG）。"""
+        d = store_mod.data_dir() / "demo_img"
+        d.mkdir(parents=True, exist_ok=True)
+        paths = []
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            try:
+                font = ImageFont.truetype("msyh.ttc", 64)
+            except Exception:
+                font = ImageFont.load_default()
+            for i, (color, text, sub) in enumerate(
+                    [((226, 232, 240), "AirPods Pro 2", "实拍 · 无修图"),
+                     ((244, 233, 214), "配件齐全", "盒 / 线 / 耳塞")], 1):
+                fp = d / ("demo%d.jpg" % i)
+                im = Image.new("RGB", (900, 900), color)
+                dr = ImageDraw.Draw(im)
+                dr.rectangle([70, 70, 830, 830], outline=(150, 158, 170), width=8)
+                dr.rounded_rectangle([150, 330, 750, 570], radius=28, fill=(255, 255, 255))
+                dr.text((190, 380), text, fill=(40, 44, 52), font=font)
+                dr.text((190, 470), sub, fill=(120, 128, 140), font=ImageFont.truetype("msyh.ttc", 34) if font else font)
+                im.save(fp, quality=88)
+                paths.append(str(fp))
+        except Exception:
+            for i in range(1, 3):
+                fp = d / ("demo%d.png" % i)
+                if not fp.exists():
+                    tk.PhotoImage(width=300, height=300).write(str(fp), format="png")
+                paths.append(str(fp))
+        if not self.store.list_images(pid):
+            for fp in paths:
+                self.store.add_image(pid, fp)
 
     # ------------------------------------------------------------ 批量生成
     def open_batch(self):
@@ -1067,6 +1290,25 @@ class App(tk.Tk):
             self.do_check()
             self.do_repair()
             self.nb.select(TAB_CHECK)
+        elif idx == 15:
+            self.theme_name = "light"; self.apply_theme()
+            self.nb.select(TAB_MINE)
+            pid = None
+            for r in self.store.list_products():
+                if r["status"] == "在售":
+                    pid = r["id"]; break
+            if pid is None:
+                p = dict(DEMO[1]); p["status"] = "在售"
+                pid = self.store.save_product(p)
+            self._make_demo_images(pid)
+            if not any(e["note"].startswith("买家问能不能包邮")
+                       for e in self.store.list_events(pid, 200)):
+                self.store.add_event(pid, "备注", "买家问能不能包邮，我说按标价可以包")
+            self._refresh_products()
+            for iid in self.tv_prod.get_children():
+                if int(self.tv_prod.item(iid, "values")[0]) == pid:
+                    self.tv_prod.selection_set(iid); self.tv_prod.see(iid); break
+            self._show_detail()
         elif idx == 14:
             self.theme_name = "light"; self.apply_theme()
             self.run_demo(8)

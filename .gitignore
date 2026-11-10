@@ -1,11 +1,9 @@
 ﻿# 本地配置（含 API Key，绝对不要提交）
 config.json
-
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
-
 # 打包产物
 build/
 build2/
@@ -28,10 +26,8 @@ modetest-*/
 tmptest-*/
 pyt/
 subtest/
-
 # 本地数据库（我的商品）
 data/
-
 # 调试截图与临时文件
 chrome-shot.png
 demo.png
@@ -39,7 +35,6 @@ ui1.png
 ui-d*.png
 *.zip
 *.log
-
 # 开发期自动化脚本（不属于产品）
 chrome-max.ps1
 click-at.ps1
@@ -50,3 +45,8 @@ shot-win.ps1
 demo_shot.py
 pipwrap.py
 pyiwrap.py
+build6/
+dist6/
+ui-v41-exe.png
+ui2.png
+ui3.png
