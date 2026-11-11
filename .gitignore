@@ -54,3 +54,10 @@ ui-v42-exe.png
 ui-v41-exe.png
 ui2.png
 ui3.png
+build8/
+dist8/
+_patch*.py
+_gridtest.py
+_run.*
+_exe.*
+ui-v43-exe.png

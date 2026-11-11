@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.2.0"
+VERSION = "4.3.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -532,3 +532,39 @@ def gen_batch(rows: list[dict]) -> list[dict]:
                         tags=" ".join("#" + t for t in c["tags"]),
                         score=chk["score"], grade=chk["grade"]))
     return out
+
+
+def find_hits(text: str, extra=None) -> list:
+    """返回正文里命中的风险词位置 [(start, end, level, word)]，给 UI 高亮用。"""
+    text = text or ""
+    low = text.lower()
+    rules = {}
+    for w in RISK_HIGH:
+        rules.setdefault(w.lower(), ("high", w))
+    for w in RISK_MID:
+        rules.setdefault(w.lower(), ("mid", w))
+    for r in (extra or []):
+        w = (r.get("word") or "").strip()
+        if w:
+            rules.setdefault(w.lower(), (r.get("level") or "high", w))
+
+    spans = []
+    for lw, (level, word) in rules.items():
+        start = 0
+        while True:
+            i = low.find(lw, start)
+            if i < 0:
+                break
+            spans.append((i, i + len(word), level, word))
+            start = i + len(lw)
+    for pat, label in CONTACT_PATTERNS:
+        for m in pat.finditer(text):
+            spans.append((m.start(), m.end(), "high", label))
+
+    spans.sort()
+    merged = []
+    for sp in spans:
+        if merged and sp[0] < merged[-1][1]:
+            continue
+        merged.append(sp)
+    return merged

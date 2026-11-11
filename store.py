@@ -380,6 +380,53 @@ class Store:
             "avg_discount": round(sum(discount_list) / len(discount_list) * 100, 1) if discount_list else 0,
         }
 
+    # ---- 批量操作
+    def duplicate_product(self, pid: int) -> int:
+        """复制一条商品（含配图），状态回到草稿。"""
+        row = self.get_product(pid)
+        if not row:
+            return 0
+        new_id = self.save_product(
+            name=(row["name"] or "") + "（副本）",
+            category=row["category"], condition=row["condition"],
+            points=row["points"], audience=row["audience"], style=row["style"],
+            price=row["price"], floor_price=row["floor_price"],
+            title=row["title"], body=row["body"], tags=row["tags"],
+            status="草稿",
+        )
+        for im in self.list_images(pid):
+            self.add_image(new_id, im["path"])
+        self.add_event(new_id, "备注", f"复制自 #{pid}")
+        return new_id
+
+    def bulk_set_status(self, ids, status: str) -> int:
+        n = 0
+        for pid in ids:
+            self.set_status(int(pid), status)
+            n += 1
+        return n
+
+    def bulk_adjust_price(self, ids, mode: str, value: float) -> int:
+        """mode: percent（按百分比涨跌）/ minus（直接加减金额）。"""
+        n = 0
+        for pid in ids:
+            row = self.get_product(int(pid))
+            if not row:
+                continue
+            old = _num(row["price"])
+            if old <= 0:
+                continue
+            new = old * (1 + value / 100.0) if mode == "percent" else old + value
+            new = max(1.0, round(new, 0))
+            if abs(new - old) < 0.5:
+                continue
+            self.conn.execute("UPDATE products SET price=?, updated_at=datetime('now','localtime') "
+                              "WHERE id=?", (str(int(new)), int(pid)))
+            self.add_event(int(pid), "改价", f"{old:.0f} → {new:.0f}")
+            n += 1
+        self.conn.commit()
+        return n
+
     def close(self):
         try:
             self.conn.close()

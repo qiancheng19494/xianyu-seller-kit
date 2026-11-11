@@ -33,6 +33,19 @@ INK = "#1B1B1B"
 GREY = "#6B7280"
 CARD = "#FFFFFF"
 LINE = "#E5E7EB"
+
+
+def _rgb(h: str):
+    h = (h or "#FFD400").lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _square(pic, size: int):
+    """居中裁成正方形再缩放到 size。"""
+    w, h = pic.size
+    s0 = min(w, h)
+    return pic.crop(((w - s0) // 2, (h - s0) // 2,
+                     (w + s0) // 2, (h + s0) // 2)).resize((size, size))
 FONT = "Microsoft YaHei UI"
 
 # 页签下标（顺序改了记得同步这里）
@@ -540,6 +553,9 @@ class App(tk.Tk):
         self.t_chk_body = tk.Text(left, height=14, font=(FONT, 10), wrap="word", relief="flat",
                                   bg="#F7F7F9", highlightthickness=1, highlightbackground="#E3E3E8")
         self.t_chk_body.pack(fill="both", expand=True)
+        self.t_chk_body.tag_configure("hl_high", background="#FFD7D7", foreground="#8B1A1A")
+        self.t_chk_body.tag_configure("hl_mid", background="#FFE9B8", foreground="#7A5200")
+        self.t_chk_body.tag_configure("hl_low", background="#E6E7EB", foreground="#444A55")
 
         bar = ttk.Frame(left, style="Card.TFrame")
         bar.pack(fill="x", pady=(10, 0))
@@ -781,22 +797,55 @@ class App(tk.Tk):
             return
         row = self.store.get_product(self._detail_pid)
         imgs = self.store.list_images(self._detail_pid)
-        try:
-            out = self._draw_grid(row, imgs)
-        except Exception as e:
-            messagebox.showerror(APP_NAME, f"生成失败：{e}")
-            return
-        self.set_status(f"九宫格已生成 → {out}")
-        if messagebox.askyesno(APP_NAME, f"九宫格已生成：\n{out}\n\n现在打开看吗？"):
-            os.startfile(out)
 
-    def _draw_grid(self, row, imgs):
-        """把商品图 + 卖点排成 3x3 方图（左上带标题价格条，右下是价格卡）。"""
+        dlg = tk.Toplevel(self)
+        dlg.title("做九宫格")
+        dlg.configure(bg=BG)
+        dlg.transient(self)
+        dlg.grab_set()
+        box = self.card(dlg, padding=18)
+        box.pack(fill="both", expand=True, padx=12, pady=12)
+
+        ttk.Label(box, text="选版式", style="H2.TLabel").pack(anchor="w")
+        v_tpl = tk.StringVar(value="classic")
+        for key, label in (("classic", "经典九宫格　3×3 方图，当主图正好"),
+                           ("feature", "主图突出　1 大 4 小 + 价格卡"),
+                           ("portrait", "竖版长图　3×4，发详情页用")):
+            ttk.Radiobutton(box, text=label, value=key, variable=v_tpl).pack(anchor="w", pady=2)
+
+        ttk.Label(box, text="主色", style="H2.TLabel").pack(anchor="w", pady=(10, 0))
+        v_color = tk.StringVar(value="#FFD400")
+        crow = ttk.Frame(box, style="Card.TFrame")
+        crow.pack(anchor="w", pady=4)
+        for label, hexv in (("闲鱼黄", "#FFD400"), ("海蓝", "#2F80ED"),
+                            ("正红", "#E4393C"), ("墨黑", "#1F2329")):
+            ttk.Radiobutton(crow, text=label, value=hexv,
+                            variable=v_color).pack(side="left", padx=(0, 12))
+
+        def go():
+            dlg.destroy()
+            try:
+                out = self._draw_grid(row, imgs, v_tpl.get(), v_color.get())
+            except Exception as e:
+                messagebox.showerror(APP_NAME, f"生成失败：{e}")
+                return
+            self.set_status(f"九宫格已生成 → {out}")
+            if messagebox.askyesno(APP_NAME, f"九宫格已生成：\n{out}\n\n现在打开看吗？"):
+                os.startfile(out)
+
+        ttk.Button(box, text="生成", style="Accent.TButton",
+                   command=go).pack(anchor="e", pady=(14, 0))
+
+    def _draw_grid(self, row, imgs, template="classic", accent="#FFD400"):
+        """商品图 + 卖点排版：classic 3×3 / feature 1 大 4 小 / portrait 3×4。"""
         from PIL import Image, ImageDraw, ImageFont
 
-        S, gap, pad = 360, 8, 10
-        size = pad * 2 + S * 3 + gap * 2
-        canvas = Image.new("RGB", (size, size), (247, 248, 250))
+        S, gap, pad = 340, 8, 10
+        cols, rows = (3, 4) if template == "portrait" else (3, 3)
+        W = pad * 2 + S * cols + gap * (cols - 1)
+        H = pad * 2 + S * rows + gap * (rows - 1)
+        canvas = Image.new("RGB", (W, H), (247, 248, 250))
+        ink = _rgb(accent)
 
         def font(n, bold=False):
             try:
@@ -804,19 +853,13 @@ class App(tk.Tk):
             except Exception:
                 return ImageFont.load_default()
 
-        # 1) 实拍图裁成正方形
         photos = []
-        for im in imgs[:5]:
+        for im in imgs[:6]:
             try:
-                pic = Image.open(im["path"]).convert("RGB")
-                w, h = pic.size
-                s0 = min(w, h)
-                pic = pic.crop(((w - s0) // 2, (h - s0) // 2, (w + s0) // 2, (h + s0) // 2))
-                photos.append(pic.resize((S, S)))
+                photos.append(_square(Image.open(im["path"]).convert("RGB"), S))
             except Exception:
                 continue
 
-        # 2) 卖点卡：一条文案一张，尽量不重复
         facts = []
         cond = (row["condition"] or "").split("（")[0].strip()
         if cond:
@@ -824,65 +867,85 @@ class App(tk.Tk):
         for pt in [x.strip() for x in re.split(r"[、,，;；/]+", row["points"] or "") if x.strip()][:4]:
             facts.append((pt[:12], "实拍 · 所见即所得"))
         for extra in ("可小刀", "走平台交易", "实拍无修图", "有问题随时问"):
-            if len(facts) >= 8:
+            if len(facts) >= 9:
                 break
             facts.append((extra, "拍下前先问清楚"))
 
-        def card(text, sub):
-            img = Image.new("RGB", (S, S), (255, 255, 255))
+        def card(text, sub, size=S):
+            img = Image.new("RGB", (size, size), (255, 255, 255))
             d = ImageDraw.Draw(img)
-            d.rounded_rectangle([16, 16, S - 16, S - 16], radius=26, outline=(228, 232, 238), width=3)
-            d.rectangle([16, 16, S - 16, 24], fill=(255, 212, 0))
-            f1, f2 = font(40, True), font(22)
+            r = max(16, int(size * 0.05))
+            d.rounded_rectangle([r, r, size - r, size - r], radius=26,
+                                outline=(228, 232, 238), width=3)
+            d.rectangle([r, r, size - r, r + 8], fill=ink)
+            f1 = font(max(22, int(size * 0.115)), True)
+            f2 = font(max(14, int(size * 0.062)))
             t = text
-            while d.textlength(t, font=f1) > S - 80 and len(t) > 2:
+            while d.textlength(t, font=f1) > size - 80 and len(t) > 2:
                 t = t[:-1]
-            d.text((40, S // 2 - 56), t, fill=(34, 38, 46), font=f1)
+            d.text((r + 24, size // 2 - int(size * 0.16)), t, fill=(34, 38, 46), font=f1)
             t2 = sub
-            while d.textlength(t2, font=f2) > S - 80 and len(t2) > 2:
+            while d.textlength(t2, font=f2) > size - 80 and len(t2) > 2:
                 t2 = t2[:-1]
-            d.text((40, S // 2 + 8), t2, fill=(138, 146, 158), font=f2)
+            d.text((r + 24, size // 2 + 8), t2, fill=(138, 146, 158), font=f2)
             return img
 
-        cards = [card(t, s2) for t, s2 in facts[:8]] or [card("实拍图待补", "点「添加图片」补几张")]
-
-        cells = list(photos)
+        cards = [card(t, s2) for t, s2 in facts] or [card("实拍图待补", "点「添加图片」补几张")]
+        pool = list(photos)
         k = 0
-        while len(cells) < 8:
-            cells.append(cards[k % len(cards)])
+        while len(pool) < 12:
+            pool.append(cards[k % len(cards)])
             k += 1
 
-        # 3) 左上主图：标题 + 价格条
-        main = cells[0].convert("RGBA")
-        main.alpha_composite(Image.new("RGBA", (S, 112), (18, 18, 22, 170)), (0, S - 112))
-        dm = ImageDraw.Draw(main)
-        f_title, f_price = font(24, True), font(34, True)
-        title = (row["title"] or row["name"] or "").strip()
-        cut = False
-        while dm.textlength(title, font=f_title) > S - 36 and len(title) > 4:
-            title, cut = title[:-1], True
-        if cut:
-            title = title[:-1] + "…"
-        dm.text((18, S - 100), title, fill=(255, 255, 255), font=f_title)
-        dm.text((18, S - 62), f"¥{row['price'] or '?'}", fill=(255, 212, 0), font=f_price)
-        cells[0] = main.convert("RGB")
+        def price_card():
+            img = Image.new("RGB", (S, S), ink)
+            d = ImageDraw.Draw(img)
+            d.text((40, 96), "到手价", fill=(64, 54, 0), font=font(30, True))
+            d.text((40, 140), f"¥{row['price'] or '?'}", fill=(28, 24, 0), font=font(78, True))
+            d.text((40, 266), "爽快可小刀", fill=(74, 62, 8), font=font(24))
+            d.text((40, 302), "只走平台 · 有问题先问", fill=(74, 62, 8), font=font(20))
+            return img
 
-        # 4) 右下价格卡
-        price_card = Image.new("RGB", (S, S), (255, 212, 0))
-        d4 = ImageDraw.Draw(price_card)
-        d4.text((40, 96), "到手价", fill=(64, 54, 0), font=font(30, True))
-        d4.text((40, 140), f"¥{row['price'] or '?'}", fill=(28, 24, 0), font=font(78, True))
-        d4.text((40, 266), "爽快可小刀", fill=(74, 62, 8), font=font(24))
-        d4.text((40, 302), "只走平台 · 有问题先问", fill=(74, 62, 8), font=font(20))
-        cells = cells[:8] + [price_card]
+        def banded(pic):
+            main = pic.convert("RGBA")
+            w, h = main.size
+            band = max(96, int(h * 0.26))
+            main.alpha_composite(Image.new("RGBA", (w, band), (18, 18, 22, 170)), (0, h - band))
+            d = ImageDraw.Draw(main)
+            f1, f2 = font(max(18, int(h * 0.06)), True), font(max(22, int(h * 0.082)), True)
+            title = (row["title"] or row["name"] or "").strip()
+            cut = False
+            while d.textlength(title, font=f1) > w - 36 and len(title) > 4:
+                title, cut = title[:-1], True
+            if cut:
+                title = title[:-1] + "…"
+            d.text((18, h - band + 8), title, fill=(255, 255, 255), font=f1)
+            d.text((18, h - band + int(band * 0.42)), f"¥{row['price'] or '?'}", fill=ink, font=f2)
+            return main.convert("RGB")
 
-        for i, pic in enumerate(cells[:9]):
-            r, c = divmod(i, 3)
-            canvas.paste(pic, (pad + c * (S + gap), pad + r * (S + gap)))
+        def put(img, r, c):
+            canvas.paste(img, (pad + c * (S + gap), pad + r * (S + gap)))
+
+        if template == "feature":
+            BS = S * 2 + gap
+            big = photos[0].resize((BS, BS)) if photos else card(facts[0][0], facts[0][1], BS)
+            put(banded(big), 0, 0)
+            put(pool[1], 0, 2)
+            put(pool[2], 1, 2)
+            put(pool[3], 2, 0)
+            put(pool[4], 2, 1)
+            put(price_card(), 2, 2)
+        else:
+            total = cols * rows
+            for i, pic in enumerate(pool[:total - 1]):
+                r, c = divmod(i, cols)
+                put(banded(pic) if i == 0 else pic, r, c)
+            put(price_card(), *(divmod(total - 1, cols)))
 
         out_dir = Path(self.store.path).parent / "grid"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out = out_dir / f"grid_{row['id']}_{time.strftime('%Y%m%d_%H%M%S')}.png"
+        tag = {"classic": "sq", "feature": "big", "portrait": "long"}.get(template, "sq")
+        out = out_dir / f"grid_{row['id']}_{tag}_{time.strftime('%Y%m%d_%H%M%S')}.png"
         canvas.save(out)
         return str(out)
 
@@ -916,8 +979,18 @@ class App(tk.Tk):
         ttk.Button(filter_bar, text="搜索", style="Ghost.TButton",
                    command=self._refresh_products).pack(side="left")
 
+        bulk_bar = ttk.Frame(left, style="Card.TFrame")
+        bulk_bar.pack(fill="x", pady=(0, 8))
+        ttk.Label(bulk_bar, text="选中多行后：", style="Hint.TLabel").pack(side="left")
+        for text, cmd in (("批量改价", self.bulk_price),
+                          ("批量在售", lambda: self.bulk_status("在售")),
+                          ("批量下架", lambda: self.bulk_status("下架")),
+                          ("复制副本", self.bulk_duplicate)):
+            ttk.Button(bulk_bar, text=text, style="Ghost.TButton",
+                       command=cmd).pack(side="left", padx=(8, 0))
+
         cols = ("id", "name", "price", "status", "days", "images", "updated")
-        self.tv_prod = ttk.Treeview(left, columns=cols, show="headings")
+        self.tv_prod = ttk.Treeview(left, columns=cols, show="headings", selectmode="extended")
         for c, t, w, a in (("id", "ID", 42, "center"), ("name", "名称", 170, "w"),
                            ("price", "价格", 70, "center"), ("status", "状态", 62, "center"),
                            ("days", "在售天", 62, "center"), ("images", "图", 40, "center"),
@@ -1197,6 +1270,15 @@ class App(tk.Tk):
         self.pull_from_copy()
         self.nb.select(TAB_CHECK)
 
+    def _highlight_check_body(self):
+        """把正文里命中的风险词涂色，改起来一眼看到。"""
+        w = self.t_chk_body
+        for tag in ("hl_high", "hl_mid", "hl_low"):
+            w.tag_remove(tag, "1.0", "end")
+        text = w.get("1.0", "end-1c")
+        for start, end, level, _word in engine.find_hits(text, self.store.word_rules()):
+            w.tag_add("hl_" + level, f"1.0+{start}c", f"1.0+{end}c")
+
     def do_check(self):
         res = engine.check_text(self.v_chk_title.get(), self.t_chk_body.get("1.0", "end"),
                                 self.v_category.get(), extra=self.store.word_rules())
@@ -1213,6 +1295,7 @@ class App(tk.Tk):
         self.t_advice.delete("1.0", "end")
         self.t_advice.insert("1.0", "\n".join("· " + s for s in res["suggestions"]))
         self.checks_today = getattr(self, "checks_today", 0) + 1
+        self._highlight_check_body()
         self.set_status(f"体检完成：{res['score']} 分（{res['grade']}）")
 
     def do_repair(self):
@@ -1247,6 +1330,7 @@ class App(tk.Tk):
             lines += ["", "【改不了，要你手动】"] + ["· " + w for w in fixed["left"]]
         lines += ["", "【还可以再改】"] + ["· " + s for s in after["suggestions"]]
         self.t_advice.insert("1.0", "\n".join(lines))
+        self._highlight_check_body()
         self.set_status(f"已修复 {len(fixed['changes'])} 处：{before['score']} → {after['score']} 分")
 
 
@@ -1319,6 +1403,68 @@ class App(tk.Tk):
             self._detail_pid = None
             self._refresh_products()
             self.set_status(f"已删除 #{pid}")
+
+    def _selected_pids(self):
+        rows = [self.tv_prod.item(i, "values") for i in self.tv_prod.selection()]
+        pids = []
+        for r in rows:
+            try:
+                pids.append(int(r[0]))
+            except Exception:
+                continue
+        if not pids:
+            messagebox.showinfo(APP_NAME, "先在左边选中一行或多行（可按住 Ctrl / Shift 多选）。")
+        return pids
+
+    def bulk_status(self, status):
+        pids = self._selected_pids()
+        if not pids:
+            return
+        n = self.store.bulk_set_status(pids, status)
+        self._refresh_products()
+        self.set_status(f"已把 {n} 件商品标为「{status}」")
+
+    def bulk_duplicate(self):
+        pids = self._selected_pids()
+        if not pids:
+            return
+        for pid in pids:
+            self.store.duplicate_product(pid)
+        self._refresh_products()
+        self.set_status(f"已复制 {len(pids)} 件商品（状态为草稿）")
+
+    def bulk_price(self):
+        pids = self._selected_pids()
+        if not pids:
+            return
+        dlg = tk.Toplevel(self)
+        dlg.title("批量改价")
+        dlg.configure(bg=BG)
+        dlg.transient(self)
+        dlg.grab_set()
+        box = self.card(dlg, padding=18)
+        box.pack(fill="both", expand=True, padx=10, pady=10)
+        ttk.Label(box, text=f"选中的 {len(pids)} 件商品", style="H2.TLabel").pack(anchor="w")
+        v_mode = tk.StringVar(value="percent")
+        ttk.Radiobutton(box, text="按百分比调价（正数涨、负数降）", value="percent",
+                        variable=v_mode).pack(anchor="w", pady=(8, 0))
+        ttk.Radiobutton(box, text="按固定金额调价（正数涨、负数降）", value="minus",
+                        variable=v_mode).pack(anchor="w")
+        v_val = tk.StringVar(value="-10")
+        ttk.Entry(box, textvariable=v_val, width=12).pack(anchor="w", pady=8)
+
+        def go():
+            try:
+                val = float(v_val.get().strip())
+            except Exception:
+                messagebox.showerror(APP_NAME, "填个数字，比如 -10")
+                return
+            dlg.destroy()
+            n = self.store.bulk_adjust_price(pids, v_mode.get(), val)
+            self._refresh_products()
+            self.set_status(f"已调整 {n} 件商品价格")
+
+        ttk.Button(box, text="确认改价", style="Accent.TButton", command=go).pack(anchor="e", pady=(10, 0))
 
     def export_products(self):
         path = filedialog.asksaveasfilename(defaultextension=".csv", initialfile="商品库.csv",
@@ -1673,6 +1819,15 @@ class App(tk.Tk):
         elif idx == 13:
             self.theme_name = "dark"; self.apply_theme()
             self.run_demo(5)
+        elif idx == 19:
+            self.theme_name = "light"; self.apply_theme()
+            self.v_chk_title.set("AirPods Pro 2 国行 | 九五新 | 自用闲置")
+            self.t_chk_body.delete("1.0", "end")
+            self.t_chk_body.insert(
+                "1.0",
+                "自用闲置，功能一切正常。绝对正品，全网最低价。可以加微信聊，支持先款。保证满意。")
+            self.nb.select(TAB_CHECK)
+            self.do_check()
         elif idx == 12:
             self.theme_name = "light"; self.apply_theme()
             self.open_batch()
