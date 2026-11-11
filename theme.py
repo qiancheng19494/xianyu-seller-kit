@@ -49,6 +49,9 @@ def style_ttk(st, pal: dict) -> None:
     st.configure("Hint.TLabel", background=pal["card"], foreground=pal["sub"], font=(FONT, 9))
     st.configure("H1.TLabel", background=pal["card"], foreground=pal["ink"], font=(FONT, 15, "bold"))
     st.configure("H2.TLabel", background=pal["card"], foreground=pal["ink"], font=(FONT, 11, "bold"))
+    st.configure("Stat.TLabel", background=pal["card"], foreground=pal["ink"], font=(FONT, 20, "bold"))
+    st.configure("StatName.TLabel", background=pal["card"], foreground=pal["sub"], font=(FONT, 9))
+    st.configure("Stat.TFrame", background=pal["card"])
     st.configure("TLabel", background=pal["bg"], foreground=pal["ink"])
     st.configure("TFrame", background=pal["bg"])
 

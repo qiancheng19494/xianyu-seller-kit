@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.1.0"
+VERSION = "4.2.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -343,8 +343,11 @@ def _hits(text: str, words) -> list[str]:
     return [w for w in words if w.lower() in low]
 
 
-def check_text(title: str, body: str, category: str = "") -> dict:
-    """发布前体检：违规词 + 联系方式 + 夸大词 + 标题评分。返回分数与问题清单。"""
+def check_text(title: str, body: str, category: str = "", extra=None) -> dict:
+    """发布前体检：违规词 + 联系方式 + 夸大词 + 标题评分。返回分数与问题清单。
+
+    extra: 自定义词库，形如 [{"word": "包过", "level": "high", "note": "我的黑名单"}]
+    """
     full = f"{title}\n{body}"
     issues: list[dict] = []
 
@@ -373,6 +376,18 @@ def check_text(title: str, body: str, category: str = "") -> dict:
         issues.append({"level": "mid", "word": word, "kind": "夸大绝对化",
                        "msg": f"「{word}」属于绝对化表述，建议弱化",
                        "fix": "改成“成色不错”“性价比高”这类可验证的说法"})
+
+    # 用户自定义词库（设置里的「词库」导入或手加）
+    low_full = full.lower()
+    for rule in extra or []:
+        w = (rule.get("word") or "").strip()
+        if not w or w.lower() not in low_full:
+            continue
+        level = rule.get("level") if rule.get("level") in ("high", "mid", "low") else "high"
+        note = (rule.get("note") or "").strip()
+        issues.append({"level": level, "word": w, "kind": "自定义词",
+                       "msg": f"命中自定义词「{w}」" + (f"（{note}）" if note else ""),
+                       "fix": note or "按你的词库要求改掉它"})
 
     # 标题检查
     t = (title or "").strip()

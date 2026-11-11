@@ -12,9 +12,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 import sys
+from datetime import datetime
 import tkinter as tk
 import urllib.request
+from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -28,10 +32,11 @@ YELLOW = "#FFD400"
 INK = "#1B1B1B"
 GREY = "#6B7280"
 CARD = "#FFFFFF"
+LINE = "#E5E7EB"
 FONT = "Microsoft YaHei UI"
 
 # 页签下标（顺序改了记得同步这里）
-TAB_OVERVIEW, TAB_COPY, TAB_PRICE, TAB_REPLY, TAB_CHECK, TAB_MINE = range(6)
+TAB_OVERVIEW, TAB_COPY, TAB_PRICE, TAB_REPLY, TAB_CHECK, TAB_REPORT, TAB_MINE = range(7)
 
 
 DEMO = {
@@ -142,7 +147,9 @@ class App(tk.Tk):
         self._build_tab_price()
         self._build_tab_reply()
         self._build_tab_check()
+        self._build_tab_report()
         self._build_tab_mine()
+        self.nb.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
         self._build_statusbar()
         self._refresh_reply_list()
@@ -200,6 +207,16 @@ class App(tk.Tk):
         self.apply_theme()
         self._refresh_overview()
         self.set_status(f"已切换到{'深色' if self.theme_name == 'dark' else '浅色'}主题")
+
+    def _on_tab_changed(self, _evt=None):
+        try:
+            cur = self.nb.index(self.nb.select())
+        except Exception:
+            return
+        if cur == TAB_REPORT:
+            self._refresh_report()
+        elif cur == TAB_OVERVIEW:
+            self._refresh_overview()
 
     def _build_header(self):
         bar = tk.Frame(self, bg=YELLOW, height=64)
@@ -532,6 +549,8 @@ class App(tk.Tk):
                    command=self.do_repair).pack(side="left", padx=8)
         ttk.Button(bar, text="从「写文案」带入", style="Ghost.TButton",
                    command=self.pull_from_copy).pack(side="left")
+        ttk.Button(bar, text="词库", style="Ghost.TButton",
+                   command=self.open_wordbook).pack(side="right")
 
         ttk.Label(right, text="体检结果", style="H1.TLabel").pack(anchor="w")
         self.lbl_score = tk.Label(right, text="—", bg=CARD, fg=INK, font=(FONT, 30, "bold"))
@@ -551,7 +570,323 @@ class App(tk.Tk):
                                 bg="#FAFAFB", highlightthickness=0)
         self.t_advice.pack(fill="x", pady=(2, 0))
 
-    # ------------------------------------------------------------ 页签 5：我的商品
+
+    # ------------------------------------------------------------ 页签 6：报表
+    def _build_tab_report(self):
+        page = ttk.Frame(self.nb, padding=0)
+        self.nb.add(page, text="报表")
+        wrap = ttk.Frame(page, padding=(0, 12))
+        wrap.pack(fill="both", expand=True)
+
+        top = ttk.Frame(wrap)
+        top.pack(fill="x")
+        ttk.Label(top, text="卖货报表", style="H1.TLabel").pack(side="left")
+        ttk.Button(top, text="刷新", style="Ghost.TButton",
+                   command=self._refresh_report).pack(side="right")
+
+        cards = ttk.Frame(wrap, style="Card.TFrame")
+        cards.pack(fill="x", pady=(10, 12))
+        self.rep_boxes = {}
+        for i, (key, label) in enumerate((("amount", "累计成交额"), ("count", "成交件数"),
+                                          ("days", "平均在售天数"), ("disc", "平均让价空间"))):
+            box = ttk.Frame(cards, style="Stat.TFrame", padding=(14, 10))
+            box.pack(side="left", fill="both", expand=True, padx=(0, 10) if i < 3 else 0)
+            val = ttk.Label(box, text="—", style="Stat.TLabel")
+            val.pack(anchor="w")
+            ttk.Label(box, text=label, style="StatName.TLabel").pack(anchor="w")
+            self.rep_boxes[key] = (box, val)
+
+        mid = ttk.Frame(wrap)
+        mid.pack(fill="both", expand=True)
+
+        left = self.card(mid)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 12))
+        ttk.Label(left, text="近 6 个月成交额", style="H2.TLabel").pack(anchor="w")
+        self.rep_canvas = tk.Canvas(left, bg=CARD, highlightthickness=0, height=210)
+        self.rep_canvas.pack(fill="both", expand=True, pady=(8, 0))
+
+        right = self.card(mid)
+        right.pack(side="left", fill="both", expand=True)
+        ttk.Label(right, text="品类表现", style="H2.TLabel").pack(anchor="w")
+        cols = ("cat", "sold", "on", "amount")
+        self.tv_cat = ttk.Treeview(right, columns=cols, show="headings", height=8)
+        for c, t, w in (("cat", "品类", 130), ("sold", "已售", 60),
+                        ("on", "在售", 60), ("amount", "成交额", 90)):
+            self.tv_cat.heading(c, text=t)
+            self.tv_cat.column(c, width=w, anchor="w" if c == "cat" else "e")
+        self.tv_cat.pack(fill="both", expand=True, pady=(8, 0))
+
+        ttk.Label(wrap, text="口径：成交额按「售出」时间归月；在售天数从首次上架算到售出；"
+                             "让价空间 = (挂牌价 − 心理底价) ÷ 挂牌价，只统计填了底价的商品。",
+                  style="Hint.TLabel").pack(anchor="w", pady=(10, 0))
+
+    def _refresh_report(self):
+        rep = self.store.sales_report()
+        self.rep_boxes["amount"][1].config(text=f"¥{rep['amount']:.0f}")
+        self.rep_boxes["count"][1].config(text=str(rep["count"]))
+        self.rep_boxes["days"][1].config(text=f"{rep['avg_days']:.1f} 天")
+        self.rep_boxes["disc"][1].config(text=f"{rep['avg_discount']:.0f}%")
+
+        self.tv_cat.delete(*self.tv_cat.get_children())
+        for cat, d in sorted(rep["cats"].items(), key=lambda kv: (-kv[1]["amount"], -kv[1]["sold"])):
+            self.tv_cat.insert("", "end", values=(cat, d["sold"], d["on_sale"], f"¥{d['amount']:.0f}"))
+
+        self._draw_bars(rep["monthly"])
+
+    def _draw_bars(self, monthly: dict):
+        cv = self.rep_canvas
+        cv.delete("all")
+        pal = self.palette
+        cv.configure(bg=pal["card"])
+        w = max(cv.winfo_width(), 320)
+        h = max(cv.winfo_height(), 180)
+        pad_l, pad_b, pad_t = 46, 30, 16
+
+        # 固定画最近 6 个月，收支为 0 的月份也留位置，柱子自然靠右
+        now = datetime.now()
+        y, m = now.year, now.month
+        months = []
+        for _ in range(6):
+            months.append(f"{y:04d}-{m:02d}")
+            m -= 1
+            if m == 0:
+                m, y = 12, y - 1
+        months.reverse()
+        vals = [monthly.get(k, 0) for k in months]
+
+        if not any(vals):
+            cv.create_text(w / 2, h / 2, text="还没有成交记录", fill=pal["sub"], font=(FONT, 10))
+            return
+
+        max_v = max(vals) or 1
+        slot = (w - pad_l - 16) / len(months)
+        bw = min(44, slot * 0.5)
+
+        cv.create_line(pad_l, h - pad_b, w - 8, h - pad_b, fill=pal["line"])
+        for i, (k, v) in enumerate(zip(months, vals)):
+            x = pad_l + slot * i + (slot - bw) / 2
+            if v > 0:
+                bh = (h - pad_b - pad_t) * (v / max_v)
+                top = h - pad_b - bh
+                cv.create_rectangle(x, top, x + bw, h - pad_b, fill=pal["accent"], outline="")
+                cv.create_text(x + bw / 2, top - 10, text=f"{v:.0f}",
+                               fill=pal["ink"], font=(FONT, 9, "bold"))
+            cv.create_text(x + bw / 2, h - pad_b + 12, text=f"{int(k[5:])}月",
+                           fill=pal["sub"], font=(FONT, 8))
+
+    # ------------------------------------------------------------ 体检词库
+    def open_wordbook(self):
+        win = tk.Toplevel(self)
+        win.title("体检词库")
+        win.geometry("560x460")
+        win.transient(self)
+        win.configure(bg=self.palette["bg"])
+
+        head = ttk.Frame(win, padding=(14, 14, 14, 6))
+        head.pack(fill="x")
+        ttk.Label(head, text="自定义词库", style="H1.TLabel").pack(anchor="w")
+        ttk.Label(head, text="命中就扣分：高危 −18、中危 −8、低危 −4。导入/导出都是 JSON。",
+                  style="Hint.TLabel").pack(anchor="w", pady=(2, 0))
+
+        bar = ttk.Frame(win, padding=(14, 6))
+        bar.pack(fill="x")
+        v_word, v_level, v_note = tk.StringVar(), tk.StringVar(value="high"), tk.StringVar()
+        ttk.Entry(bar, textvariable=v_word, width=14).pack(side="left")
+        ttk.Combobox(bar, textvariable=v_level, values=["high", "mid", "low"],
+                     state="readonly", width=7).pack(side="left", padx=6)
+        ttk.Entry(bar, textvariable=v_note, width=14).pack(side="left")
+        ttk.Button(bar, text="添加", style="Accent.TButton",
+                   command=lambda: (self.add_word(v_word.get(), v_level.get(), v_note.get()),
+                                    v_word.set(""), v_note.set())).pack(side="left", padx=8)
+
+        cols = ("word", "level", "note")
+        tv = ttk.Treeview(win, columns=cols, show="headings", height=10)
+        for c, t, w in (("word", "词", 140), ("level", "等级", 70), ("note", "备注", 300)):
+            tv.heading(c, text=t)
+            tv.column(c, width=w, anchor="w")
+        tv.pack(fill="both", expand=True, padx=14, pady=6)
+
+        def refresh():
+            tv.delete(*tv.get_children())
+            for r in self.store.list_words():
+                tv.insert("", "end", iid=str(r["id"]), values=(r["word"], r["level"], r["note"]))
+
+        foot = ttk.Frame(win, padding=(14, 6, 14, 14))
+        foot.pack(fill="x")
+        ttk.Button(foot, text="删除选中", style="Ghost.TButton",
+                   command=lambda: [self.store.delete_word(int(i)), refresh()]
+                   if (i := (tv.selection() or [None])[0]) else None).pack(side="left")
+        ttk.Button(foot, text="导入 JSON", style="Ghost.TButton",
+                   command=lambda: self.import_words(refresh)).pack(side="left", padx=8)
+        ttk.Button(foot, text="导出 JSON", style="Ghost.TButton",
+                   command=self.export_words).pack(side="left")
+        ttk.Button(foot, text="关闭", style="Ghost.TButton", command=win.destroy).pack(side="right")
+
+        self.wordbook_tv = tv
+        refresh()
+
+    def add_word(self, word, level, note):
+        if not (word or "").strip():
+            return
+        self.store.add_word(word.strip(), level, (note or "").strip())
+        if hasattr(self, "wordbook_tv"):
+            self._refresh_wordbook()
+
+    def _refresh_wordbook(self):
+        tv = self.wordbook_tv
+        tv.delete(*tv.get_children())
+        for r in self.store.list_words():
+            tv.insert("", "end", iid=str(r["id"]), values=(r["word"], r["level"], r["note"]))
+
+    def import_words(self, refresh=None):
+        path = filedialog.askopenfilename(title="导入词库",
+                                          filetypes=[("JSON", "*.json"), ("所有文件", "*.*")])
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+        except Exception as e:
+            messagebox.showerror(APP_NAME, f"读不了这个 JSON：{e}")
+            return
+        items = data if isinstance(data, list) else data.get("words", [])
+        n = 0
+        for it in items:
+            if isinstance(it, str):
+                self.store.add_word(it, "high", "")
+                n += 1
+            elif isinstance(it, dict) and it.get("word"):
+                self.store.add_word(str(it["word"]), it.get("level", "high"), it.get("note", ""))
+                n += 1
+        if refresh:
+            refresh()
+        self.set_status(f"导入了 {n} 个词")
+
+    def export_words(self):
+        rows = self.store.word_rules()
+        if not rows:
+            messagebox.showinfo(APP_NAME, "词库还是空的，先加几个词。")
+            return
+        path = filedialog.asksaveasfilename(title="导出词库", defaultextension=".json",
+                                            initialfile="wordbook.json",
+                                            filetypes=[("JSON", "*.json")])
+        if not path:
+            return
+        Path(path).write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.set_status(f"已导出 {len(rows)} 个词 → {path}")
+
+    # ------------------------------------------------------------ 九宫格图
+    def make_grid_image(self):
+        if not self._detail_pid:
+            messagebox.showinfo(APP_NAME, "先在左边选中一个商品。")
+            return
+        row = self.store.get_product(self._detail_pid)
+        imgs = self.store.list_images(self._detail_pid)
+        try:
+            out = self._draw_grid(row, imgs)
+        except Exception as e:
+            messagebox.showerror(APP_NAME, f"生成失败：{e}")
+            return
+        self.set_status(f"九宫格已生成 → {out}")
+        if messagebox.askyesno(APP_NAME, f"九宫格已生成：\n{out}\n\n现在打开看吗？"):
+            os.startfile(out)
+
+    def _draw_grid(self, row, imgs):
+        """把商品图 + 卖点排成 3x3 方图（左上带标题价格条，右下是价格卡）。"""
+        from PIL import Image, ImageDraw, ImageFont
+
+        S, gap, pad = 360, 8, 10
+        size = pad * 2 + S * 3 + gap * 2
+        canvas = Image.new("RGB", (size, size), (247, 248, 250))
+
+        def font(n, bold=False):
+            try:
+                return ImageFont.truetype("msyhbd.ttc" if bold else "msyh.ttc", n)
+            except Exception:
+                return ImageFont.load_default()
+
+        # 1) 实拍图裁成正方形
+        photos = []
+        for im in imgs[:5]:
+            try:
+                pic = Image.open(im["path"]).convert("RGB")
+                w, h = pic.size
+                s0 = min(w, h)
+                pic = pic.crop(((w - s0) // 2, (h - s0) // 2, (w + s0) // 2, (h + s0) // 2))
+                photos.append(pic.resize((S, S)))
+            except Exception:
+                continue
+
+        # 2) 卖点卡：一条文案一张，尽量不重复
+        facts = []
+        cond = (row["condition"] or "").split("（")[0].strip()
+        if cond:
+            facts.append((cond, "成色如实描述"))
+        for pt in [x.strip() for x in re.split(r"[、,，;；/]+", row["points"] or "") if x.strip()][:4]:
+            facts.append((pt[:12], "实拍 · 所见即所得"))
+        for extra in ("可小刀", "走平台交易", "实拍无修图", "有问题随时问"):
+            if len(facts) >= 8:
+                break
+            facts.append((extra, "拍下前先问清楚"))
+
+        def card(text, sub):
+            img = Image.new("RGB", (S, S), (255, 255, 255))
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle([16, 16, S - 16, S - 16], radius=26, outline=(228, 232, 238), width=3)
+            d.rectangle([16, 16, S - 16, 24], fill=(255, 212, 0))
+            f1, f2 = font(40, True), font(22)
+            t = text
+            while d.textlength(t, font=f1) > S - 80 and len(t) > 2:
+                t = t[:-1]
+            d.text((40, S // 2 - 56), t, fill=(34, 38, 46), font=f1)
+            t2 = sub
+            while d.textlength(t2, font=f2) > S - 80 and len(t2) > 2:
+                t2 = t2[:-1]
+            d.text((40, S // 2 + 8), t2, fill=(138, 146, 158), font=f2)
+            return img
+
+        cards = [card(t, s2) for t, s2 in facts[:8]] or [card("实拍图待补", "点「添加图片」补几张")]
+
+        cells = list(photos)
+        k = 0
+        while len(cells) < 8:
+            cells.append(cards[k % len(cards)])
+            k += 1
+
+        # 3) 左上主图：标题 + 价格条
+        main = cells[0].convert("RGBA")
+        main.alpha_composite(Image.new("RGBA", (S, 112), (18, 18, 22, 170)), (0, S - 112))
+        dm = ImageDraw.Draw(main)
+        f_title, f_price = font(24, True), font(34, True)
+        title = (row["title"] or row["name"] or "").strip()
+        cut = False
+        while dm.textlength(title, font=f_title) > S - 36 and len(title) > 4:
+            title, cut = title[:-1], True
+        if cut:
+            title = title[:-1] + "…"
+        dm.text((18, S - 100), title, fill=(255, 255, 255), font=f_title)
+        dm.text((18, S - 62), f"¥{row['price'] or '?'}", fill=(255, 212, 0), font=f_price)
+        cells[0] = main.convert("RGB")
+
+        # 4) 右下价格卡
+        price_card = Image.new("RGB", (S, S), (255, 212, 0))
+        d4 = ImageDraw.Draw(price_card)
+        d4.text((40, 96), "到手价", fill=(64, 54, 0), font=font(30, True))
+        d4.text((40, 140), f"¥{row['price'] or '?'}", fill=(28, 24, 0), font=font(78, True))
+        d4.text((40, 266), "爽快可小刀", fill=(74, 62, 8), font=font(24))
+        d4.text((40, 302), "只走平台 · 有问题先问", fill=(74, 62, 8), font=font(20))
+        cells = cells[:8] + [price_card]
+
+        for i, pic in enumerate(cells[:9]):
+            r, c = divmod(i, 3)
+            canvas.paste(pic, (pad + c * (S + gap), pad + r * (S + gap)))
+
+        out_dir = Path(self.store.path).parent / "grid"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"grid_{row['id']}_{time.strftime('%Y%m%d_%H%M%S')}.png"
+        canvas.save(out)
+        return str(out)
+
+    # ------------------------------------------------------------ 页签 7：我的商品
     def _build_tab_mine(self):
         page = ttk.Frame(self.nb, padding=0)
         self.nb.add(page, text="我的商品")
@@ -626,6 +961,8 @@ class App(tk.Tk):
                    command=self.add_images).pack(side="left")
         ttk.Button(img_bar, text="打开第一张", style="Ghost.TButton",
                    command=self.open_first_image).pack(side="left", padx=8)
+        ttk.Button(img_bar, text="做九宫格", style="Ghost.TButton",
+                   command=self.make_grid_image).pack(side="left")
 
         self.lbl_time_head = ttk.Label(right, text="上架时间线", style="H2.TLabel")
         self.lbl_time_head.pack(anchor="w")
@@ -862,7 +1199,7 @@ class App(tk.Tk):
 
     def do_check(self):
         res = engine.check_text(self.v_chk_title.get(), self.t_chk_body.get("1.0", "end"),
-                                self.v_category.get())
+                                self.v_category.get(), extra=self.store.word_rules())
         self.last_grade = res["grade"]
         self.last_score = res["score"]
         self.lbl_score.config(text=f"{res['score']} 分",
@@ -882,7 +1219,7 @@ class App(tk.Tk):
         """一键修复：换绝对化词、删站外句子，修完自动复检并对比分数。"""
         title = self.v_chk_title.get()
         body = self.t_chk_body.get("1.0", "end")
-        before = engine.check_text(title, body, self.v_category.get())
+        before = engine.check_text(title, body, self.v_category.get(), extra=self.store.word_rules())
         fixed = engine.repair_text(title, body)
 
         if not fixed["changes"]:
@@ -892,7 +1229,8 @@ class App(tk.Tk):
         self.v_chk_title.set(fixed["title"])
         self.t_chk_body.delete("1.0", "end")
         self.t_chk_body.insert("1.0", fixed["body"])
-        after = engine.check_text(fixed["title"], fixed["body"], self.v_category.get())
+        after = engine.check_text(fixed["title"], fixed["body"], self.v_category.get(),
+                                  extra=self.store.word_rules())
 
         self.last_grade, self.last_score = after["grade"], after["score"]
         self.lbl_score.config(text=f"{before['score']} → {after['score']}",
@@ -1290,6 +1628,26 @@ class App(tk.Tk):
             self.do_check()
             self.do_repair()
             self.nb.select(TAB_CHECK)
+        elif idx == 16:
+            self.theme_name = "light"; self.apply_theme()
+            self.nb.select(TAB_REPORT)
+            self._refresh_report()
+        elif idx == 17:
+            self.theme_name = "light"; self.apply_theme()
+            self.nb.select(TAB_CHECK)
+            self.store.add_word("包过", "high", "我的黑名单")
+            self.store.add_word("内部渠道", "mid", "")
+            self.store.add_word("加钱插队", "high", "不接急单")
+            self.open_wordbook()
+        elif idx == 18:
+            self.theme_name = "light"; self.apply_theme()
+            self.nb.select(TAB_MINE)
+            self._refresh_products()
+            kids = self.tv_prod.get_children()
+            if kids:
+                self.tv_prod.selection_set(kids[0])
+                self._show_detail()
+                self.make_grid_image()
         elif idx == 15:
             self.theme_name = "light"; self.apply_theme()
             self.nb.select(TAB_MINE)

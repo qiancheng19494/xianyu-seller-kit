@@ -1,4 +1,4 @@
-﻿# 本地配置（含 API Key，绝对不要提交）
+# 本地配置（含 API Key，绝对不要提交）
 config.json
 # Python
 __pycache__/
@@ -47,6 +47,10 @@ pipwrap.py
 pyiwrap.py
 build6/
 dist6/
+build7/
+dist7/
+shot-title.ps1
+ui-v42-exe.png
 ui-v41-exe.png
 ui2.png
 ui3.png

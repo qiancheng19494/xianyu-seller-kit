@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -20,6 +21,13 @@ from datetime import datetime
 from pathlib import Path
 
 STATUSES = ["草稿", "在售", "已售", "下架"]
+
+
+def _num(text) -> float:
+    try:
+        return float(re.sub(r"[^\d.]", "", str(text or "")))
+    except Exception:
+        return 0.0
 
 # 时间线里用到的动作名（顺序即展示优先级）
 KINDS = ["创建", "上架", "改价", "售出", "下架", "备注", "图片"]
@@ -103,6 +111,13 @@ class Store:
             );
             CREATE INDEX IF NOT EXISTS idx_events_pid ON events(product_id, at);
             CREATE INDEX IF NOT EXISTS idx_images_pid ON product_images(product_id);
+            CREATE TABLE IF NOT EXISTS dict_words(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                word TEXT NOT NULL,
+                level TEXT DEFAULT 'high',
+                note TEXT DEFAULT '',
+                created_at TEXT DEFAULT ''
+            );
             """
         )
         self.conn.commit()
@@ -295,6 +310,75 @@ class Store:
         for r in self.conn.execute("SELECT question, answer FROM phrases ORDER BY id"):
             bank.setdefault(r["question"], []).append(r["answer"])
         return bank
+
+    # ------------------------------------------------------------ 体检词库
+    def add_word(self, word: str, level: str = "high", note: str = "") -> int:
+        word = (word or "").strip()
+        if not word:
+            return 0
+        old = self.conn.execute("SELECT id FROM dict_words WHERE word=?", (word,)).fetchone()
+        if old:
+            self.conn.execute("UPDATE dict_words SET level=?, note=? WHERE id=?",
+                              (level, note, old["id"]))
+            self.conn.commit()
+            return int(old["id"])
+        cur = self.conn.execute(
+            "INSERT INTO dict_words(word, level, note, created_at) VALUES(?,?,?,?)",
+            (word, level, note, time.strftime("%Y-%m-%d %H:%M")))
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def list_words(self) -> list[sqlite3.Row]:
+        return list(self.conn.execute("SELECT * FROM dict_words ORDER BY id DESC"))
+
+    def delete_word(self, wid: int) -> None:
+        self.conn.execute("DELETE FROM dict_words WHERE id=?", (wid,))
+        self.conn.commit()
+
+    def word_rules(self) -> list[dict]:
+        return [{"word": r["word"], "level": r["level"], "note": r["note"]}
+                for r in self.conn.execute("SELECT word, level, note FROM dict_words ORDER BY id")]
+
+    # ------------------------------------------------------------ 报表
+    def sales_report(self) -> dict:
+        """已售成交、按月成交额、品类表现、平均在售天数、平均让价空间。"""
+        sold, monthly, cats = [], {}, {}
+        days_list, discount_list = [], []
+
+        for r in self.conn.execute("SELECT * FROM products"):
+            price = _num(r["price"])
+            cat = r["category"] or "其他"
+            entry = cats.setdefault(cat, {"sold": 0, "on_sale": 0, "amount": 0.0})
+            if r["status"] == "在售":
+                entry["on_sale"] += 1
+            if r["status"] != "已售":
+                continue
+
+            ev = self.conn.execute(
+                "SELECT at FROM events WHERE product_id=? AND kind='售出' "
+                "ORDER BY at DESC LIMIT 1", (r["id"],)).fetchone()
+            sold_at = ev["at"] if ev else (r["updated_at"] or "")
+            d = self.days_on_sale(r["id"])
+            sold.append({"id": r["id"], "name": r["name"], "price": price,
+                         "sold_at": sold_at, "days": d, "category": cat})
+            monthly[sold_at[:7]] = round(monthly.get(sold_at[:7], 0) + price, 2)
+            entry["sold"] += 1
+            entry["amount"] = round(entry["amount"] + price, 2)
+            if d is not None:
+                days_list.append(d)
+            floor = _num(r["floor_price"])
+            if price > 0 and 0 < floor < price:
+                discount_list.append((price - floor) / price)
+
+        return {
+            "sold": sold,
+            "count": len(sold),
+            "amount": round(sum(s["price"] for s in sold), 2),
+            "monthly": dict(sorted(monthly.items())),
+            "cats": cats,
+            "avg_days": round(sum(days_list) / len(days_list), 1) if days_list else 0,
+            "avg_discount": round(sum(discount_list) / len(discount_list) * 100, 1) if discount_list else 0,
+        }
 
     def close(self):
         try:
