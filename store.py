@@ -381,6 +381,74 @@ class Store:
         }
 
     # ---- 批量操作
+    def _listed_price(self, pid: int, current: float) -> float:
+        """按最早一次「改价」事件倒推挂牌价；没有改价记录就按当前价。"""
+        olds = []
+        for e in self.list_events(pid, 300):
+            if (e["kind"] or "") != "改价":
+                continue
+            m = re.match(r"\s*([\d.]+)\s*→", e["note"] or "")
+            if m:
+                olds.append((e["id"], float(m.group(1))))
+        if not olds:
+            return current
+        olds.sort(key=lambda x: x[0])
+        return olds[0][1]
+
+    def sale_compare(self) -> list:
+        """成交价 vs 挂牌价（按售出月份取平均）。"""
+        groups = {}
+        for row in self.list_products():
+            if (row["status"] or "") != "已售":
+                continue
+            sold_at = ""
+            for e in self.list_events(row["id"], 300):
+                if (e["kind"] or "") == "售出":
+                    sold_at = e["at"] or ""
+                    break
+            sold_at = sold_at or row["updated_at"] or ""
+            price = _num(row["price"])
+            listed = self._listed_price(row["id"], price)
+            g = groups.setdefault((sold_at or "")[:7] or "未知", {"listed": [], "sold": []})
+            g["listed"].append(listed)
+            g["sold"].append(price)
+        out = []
+        for month in sorted(groups):
+            g = groups[month]
+            out.append({"month": month,
+                        "listed": round(sum(g["listed"]) / len(g["listed"]), 1),
+                        "sold": round(sum(g["sold"]) / len(g["sold"]), 1)})
+        return out
+
+    def add_photo(self, pid: int, src, max_side: int = 1200, watermark: bool = True,
+                  label: str = "实拍 · 勿盗图") -> int:
+        """导入一张配图：可选缩边、可选打水印，统一存成 jpg 放 data/photos/。"""
+        from PIL import Image, ImageDraw, ImageFont
+
+        src = Path(src)
+        im = Image.open(src).convert("RGB")
+        w, h = im.size
+        scale = min(1.0, max_side / max(w, h))
+        if scale < 1.0:
+            im = im.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+        if watermark:
+            d = ImageDraw.Draw(im, "RGBA")
+            size = max(16, im.width // 32)
+            try:
+                font = ImageFont.truetype("msyh.ttc", size)
+            except Exception:
+                font = ImageFont.load_default()
+            tw = d.textlength(label, font=font)
+            x = max(10, im.width - tw - 40)
+            y = max(10, im.height - size * 2 - 26)
+            d.rectangle([x - 10, y - 8, x + tw + 10, y + size + 10], fill=(0, 0, 0, 88))
+            d.text((x, y), label, fill=(255, 255, 255, 215), font=font)
+        out_dir = Path(self.path).parent / "photos"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"{pid}_{src.stem}_{time.strftime('%H%M%S')}.jpg"
+        im.save(out, "JPEG", quality=85, optimize=True)
+        return self.add_image(pid, str(out))
+
     def duplicate_product(self, pid: int) -> int:
         """复制一条商品（含配图），状态回到草稿。"""
         row = self.get_product(pid)

@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.3.0"
+VERSION = "4.4.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -568,3 +568,49 @@ def find_hits(text: str, extra=None) -> list:
             continue
         merged.append(sp)
     return merged
+
+
+def listing_text(row, imgs=None, grid_path: str = "") -> str:
+    """生成一份可以照着填的「发布清单」（纯文本，粘贴到闲鱼也能用）。"""
+    imgs = imgs or []
+    price = row["price"] or "?"
+    floor = row["floor_price"] or ""
+    lines = [
+        f"【{row['name']}】发布清单",
+        "=" * 30,
+        "",
+        "① 标题（复制到闲鱼标题栏，≤30 字）",
+        row["title"] or row["name"] or "",
+        "",
+        f"② 价格：{price} 元" + (f"（心里底价 {floor} 元，别再低了）" if floor else ""),
+        f"③ 成色：{row['condition'] or '-'}　品类：{row['category'] or '-'}",
+        "",
+        "④ 正文（复制到描述里）",
+        row["body"] or "",
+        "",
+        "⑤ 标签（贴到描述末尾）",
+        row["tags"] or "",
+        "",
+        "⑥ 配图",
+    ]
+    if imgs:
+        for i, im in enumerate(imgs, 1):
+            lines.append(f"   {i}. {im['path']}")
+    else:
+        lines.append("   （还没有配图，点「添加图片」补实拍图）")
+    if grid_path:
+        lines.append(f"   九宫格：{grid_path}")
+    lines += [
+        "",
+        "⑦ 发布步骤",
+        "   1. 闲鱼 → 卖闲置 → 拍照/相册选图（先放主图，再放细节图）",
+        "   2. 标题粘 ①，描述粘 ④，末尾粘 ⑤",
+        "   3. 价格填 ②，运费按实际情况（包邮能提高点击）",
+        "   4. 选「个人闲置」，确认无违规词后发布",
+        "",
+        "⑧ 发布前自查",
+        "   · 描述里没有微信/先款/转账等站外联系方式",
+        "   · 没有「绝对、全网最低、保证」这类绝对化词",
+        "   · 图片是实拍，不用网图，不露个人信息",
+    ]
+    return "\n".join(lines)

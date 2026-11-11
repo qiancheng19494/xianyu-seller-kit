@@ -61,3 +61,8 @@ _gridtest.py
 _run.*
 _exe.*
 ui-v43-exe.png
+
+build9/
+dist9/
+_*.py
+ui-v44-photo.jpg
