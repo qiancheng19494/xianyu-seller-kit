@@ -386,14 +386,13 @@ class Store:
         row = self.get_product(pid)
         if not row:
             return 0
-        new_id = self.save_product(
-            name=(row["name"] or "") + "（副本）",
-            category=row["category"], condition=row["condition"],
-            points=row["points"], audience=row["audience"], style=row["style"],
-            price=row["price"], floor_price=row["floor_price"],
-            title=row["title"], body=row["body"], tags=row["tags"],
-            status="草稿",
-        )
+        row = dict(row)
+        data = {k: row.get(k) for k in ("name", "category", "condition", "points",
+                                        "audience", "style", "price", "floor_price",
+                                        "title", "body", "tags")}
+        data["name"] = (data.get("name") or "") + "（副本）"
+        data["status"] = "草稿"
+        new_id = self.save_product(data)
         for im in self.list_images(pid):
             self.add_image(new_id, im["path"])
         self.add_event(new_id, "备注", f"复制自 #{pid}")
