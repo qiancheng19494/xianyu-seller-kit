@@ -461,6 +461,7 @@ class App(tk.Tk):
 
         self.v_orig = tk.StringVar()
         self.v_floor_in = tk.StringVar()
+        self.v_days = tk.StringVar()
         self.v_cat2 = tk.StringVar(value=list(engine.CATEGORIES)[0])
         self.v_cond2 = tk.StringVar(value=list(engine.CONDITIONS)[2])
 
@@ -475,6 +476,7 @@ class App(tk.Tk):
                                        state="readonly", width=16))
         cell(1, 1, "成色", ttk.Combobox(grid, textvariable=self.v_cond2, values=list(engine.CONDITIONS),
                                        state="readonly", width=16))
+        cell(2, 0, "在售天数（可选）", ttk.Entry(grid, textvariable=self.v_days, width=18))
 
         ttk.Button(box, text="算出建议价", style="Accent.TButton",
                    command=self.do_price).pack(anchor="w", pady=(16, 12))
@@ -602,6 +604,8 @@ class App(tk.Tk):
         ttk.Label(top, text="卖货报表", style="H1.TLabel").pack(side="left")
         ttk.Button(top, text="刷新", style="Ghost.TButton",
                    command=self._refresh_report).pack(side="right")
+        ttk.Button(top, text="生成本周周报", style="Accent.TButton",
+                   command=self.export_weekly).pack(side="right", padx=(0, 8))
 
         cards = ttk.Frame(wrap, style="Card.TFrame")
         cards.pack(fill="x", pady=(10, 12))
@@ -655,6 +659,67 @@ class App(tk.Tk):
 
         self._draw_bars(rep["monthly"])
         self._draw_compare(self.store.sale_compare())
+
+    def export_weekly(self):
+        """生成本周复盘周报（Markdown），存 data/reports 并复制到剪贴板。"""
+        r = self.store.weekly_report(7)
+        today = time.strftime("%Y-%m-%d")
+        lines = [
+            "# 卖货周报 · %s" % today,
+            "",
+            "统计口径：最近 7 天（含今天）。",
+            "",
+            "## 本周成交",
+            "",
+            "| 商品 | 成交价 | 挂牌价 | 在售天数 | 售出 |",
+            "| --- | ---: | ---: | ---: | --- |",
+        ]
+        if r["sold"]:
+            for it in r["sold"]:
+                lines.append("| %s | ¥%.0f | ¥%.0f | %d 天 | %s |"
+                             % (it["name"], it["price"], it["listed"], it["days"] or 0, it["when"]))
+        else:
+            lines.append("| 本周没有成交 | — | — | — | — |")
+        lines += [
+            "",
+            "**本周成交额 ¥%.0f，共 %d 件；上周 %d 件 / ¥%.0f。**"
+            % (r["amount"], r["count"], r["prev_count"], r["prev_amount"]),
+            "",
+            "## 关键数字",
+            "",
+            "- 平均在售天数：%.1f 天" % r["avg_days"],
+            "- 平均让价：%.0f%%（挂牌 → 成交）" % r["avg_discount"],
+            "- 本周新增商品：%d 件；新增配图：%d 张" % (r["added"], r["photos"]),
+            "",
+            "## 卡住的货（最久没卖掉的）",
+            "",
+        ]
+        if r["stale"]:
+            for days, name, price in r["stale"]:
+                lines.append("- %s（挂了 %d 天，标价 ¥%.0f）" % (name, days or 0, price))
+            lines += ["", "建议：挂了 30 天以上还没动静，先把标价调到区间下限，标题补「可小刀」。"]
+        else:
+            lines.append("- 没有积压，清得不错。")
+        lines += [
+            "",
+            "## 下周做什么",
+            "",
+            "1. 把上面「卡住的货」各降一档，配 3 张新实拍图重新发一次。",
+            "2. 成交过的品类可以再收一件同类型，好卖的先堆量。",
+            "3. 新上的货记得走一遍「发布体检」，别因为措辞被限流。",
+            "",
+            "> 数据来自本地商品库；降价/改价都记在那件商品的上架时间线里。",
+        ]
+        text = "\n".join(lines)
+
+        out_dir = Path(self.store.path).parent / "reports"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / ("周报_%s.md" % time.strftime("%Y%m%d"))
+        out.write_text(text, encoding="utf-8")
+        copy_to_clipboard(self, text)
+        self.set_status("周报已生成：%s" % out.name)
+        if messagebox.askyesno(APP_NAME, "周报已保存到 data/reports 并复制到剪贴板。\n要打开看看吗？"):
+            self._open_path(str(out))
 
     def _draw_compare(self, points: list):
         """成交价（实线）/ 挂牌价（虚线）按月折线。"""
@@ -1093,6 +1158,8 @@ class App(tk.Tk):
         img_bar.pack(fill="x", pady=(4, 10))
         ttk.Button(img_bar, text="添加图片", style="Ghost.TButton",
                    command=self.add_images).pack(side="left")
+        ttk.Button(img_bar, text="导入文件夹", style="Ghost.TButton",
+                   command=self.import_folder).pack(side="left", padx=(8, 0))
         ttk.Button(img_bar, text="打开第一张", style="Ghost.TButton",
                    command=self.open_first_image).pack(side="left", padx=8)
         ttk.Button(img_bar, text="做九宫格", style="Ghost.TButton",
@@ -1224,8 +1291,21 @@ class App(tk.Tk):
     def do_price(self):
         res = engine.suggest_price(self.v_orig.get(), self.v_cat2.get(), self.v_cond2.get(),
                                    self.v_floor_in.get())
+        text = res["text"] if res.get("ok") else res.get("msg", "")
+        try:
+            days = int(float(self.v_days.get() or 0))
+        except ValueError:
+            days = 0
+        try:
+            floor = float(self.v_floor_in.get() or 0)
+        except ValueError:
+            floor = 0.0
+        rng = engine.price_range(self.v_orig.get(), self.v_cat2.get(), self.v_cond2.get(),
+                                 days=days, floor=floor)
+        if rng.get("ok"):
+            text += "\n\n" + "=" * 34 + "\n" + rng["text"]
         self.t_price.delete("1.0", "end")
-        self.t_price.insert("1.0", res["text"] if res.get("ok") else res.get("msg", ""))
+        self.t_price.insert("1.0", text)
 
     # ------------------------------------------------------------ 动作：回买家
     def _custom_questions(self) -> list[str]:
@@ -1694,6 +1774,30 @@ class App(tk.Tk):
             msg += f"（{failed} 张失败）"
         self.set_status(msg)
 
+    def import_folder(self):
+        """把一个文件夹里的图片批量导入当前商品（可压缩 + 水印）。"""
+        if not self._detail_pid:
+            messagebox.showinfo(APP_NAME, "先在列表里选一个商品。")
+            return
+        folder = filedialog.askdirectory(title="选择装着急需处理的图片的文件夹")
+        if not folder:
+            return
+        opts = self._ask_photo_options()
+        if not opts:
+            return
+        compress, mark = opts
+        ok, failed = self.store.batch_import_dir(
+            self._detail_pid, folder, max_side=1200 if compress else 4000, watermark=mark)
+        self._show_detail()
+        self._refresh_products()
+        msg = "已导入 %d 张图" % ok
+        if failed:
+            msg += "，%d 张失败" % len(failed)
+        self.set_status(msg)
+        if failed:
+            detail = "\n".join("%s：%s" % (n, e) for n, e in failed[:5])
+            messagebox.showwarning(APP_NAME, msg + "\n\n" + detail)
+
     def open_first_image(self):
         if not self._detail_pid:
             return
@@ -1956,6 +2060,12 @@ class App(tk.Tk):
         elif idx == 13:
             self.theme_name = "dark"; self.apply_theme()
             self.run_demo(5)
+        elif idx == 20:
+            self.theme_name = "light"; self.apply_theme()
+            self.nb.select(TAB_PRICE)
+            self.v_orig.set("1299"); self.v_floor_in.set("")
+            self.v_cat2.set("数码/耳机"); self.v_cond2.set("九五新（用过几次）")
+            self.v_days.set("35"); self.do_price()
         elif idx == 19:
             self.theme_name = "light"; self.apply_theme()
             self.v_chk_title.set("AirPods Pro 2 国行 | 九五新 | 自用闲置")

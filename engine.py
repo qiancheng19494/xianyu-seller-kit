@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.4.0"
+VERSION = "4.5.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -614,3 +614,56 @@ def listing_text(row, imgs=None, grid_path: str = "") -> str:
         "   · 图片是实拍，不用网图，不露个人信息",
     ]
     return "\n".join(lines)
+
+
+def price_range(orig, category: str, condition: str, days: int = 0, floor: float = 0) -> dict:
+    """按品类/成色/在售天数给一个建议挂价区间。"""
+    base = _num(orig)
+    if not base:
+        return {"ok": False, "msg": "先填一下原价（买入价），比如 1299。"}
+    cat_k = CATEGORIES.get(category, 0.5)
+    cond_k = CONDITIONS.get(condition, 0.86)
+    mid = base * cat_k * cond_k
+
+    if days <= 7:
+        k, tip = 1.18, "刚上架，按正常价挂，留出砍价空间。"
+    elif days <= 30:
+        k, tip = 1.08, "挂了快一个月，可以松一点，但别主动降价。"
+    elif days <= 60:
+        k, tip = 0.96, "超过一个月还没出手，建议降一档，标「可小刀」。"
+    else:
+        k, tip = 0.86, "挂了两个月以上，价格已经影响成交了，果断降到区间下限。"
+
+    anchor = mid * k
+    high = anchor
+    low = anchor * 0.88
+    if floor and floor > 0:
+        low = max(low, floor)
+        high = max(high, low)
+
+    def r10(v):
+        return int(round(v / 10.0) * 10)
+
+    low, high = r10(low), r10(high)
+    deal = r10(low + (high - low) * 0.45)
+    lines = [
+        "建议挂价区间：%d – %d 元" % (low, high),
+        "预期成交：%d 元左右" % deal,
+        "",
+        "依据：原价 %d × 品类系数 %.2f（%s）× 成色系数 %.2f（%s）= 市场价 %d 元"
+        % (base, cat_k, category, cond_k, condition, r10(mid)),
+        "在售 %d 天 → 挂牌系数 %.2f：%s" % (days, k, tip),
+    ]
+    if floor and floor > 0:
+        lines.append("你的底价 %d 元：区间下限已抬到底价。" % floor)
+        if floor >= mid:
+            lines.append("注意：底价已经接近甚至高于建议成交价，这样容易一直挂着不动。")
+    lines += [
+        "",
+        "怎么看这个区间：",
+        "· 想快出：直接挂下限，标题加「急出」。",
+        "· 正常卖：挂中间偏上，留 10% 砍价空间。",
+        "· 不急：挂上限，但超过 30 天没动静就要往下调。",
+    ]
+    return {"ok": True, "low": low, "high": high, "mid": r10(mid), "deal": deal, "days": days,
+            "text": "\n".join(lines)}

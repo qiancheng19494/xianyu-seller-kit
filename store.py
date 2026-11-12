@@ -449,6 +449,94 @@ class Store:
         im.save(out, "JPEG", quality=85, optimize=True)
         return self.add_image(pid, str(out))
 
+    def batch_import_dir(self, pid: int, folder, max_side: int = 1200,
+                         watermark: bool = True) -> tuple:
+        """把一个文件夹里的图片全部导入某商品，返回 (成功数, 失败列表)。"""
+        ok, failed = 0, []
+        exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+        files = sorted(x for x in Path(folder).iterdir()
+                       if x.is_file() and x.suffix.lower() in exts)
+        for f in files:
+            try:
+                self.add_photo(pid, f, max_side=max_side, watermark=watermark)
+                ok += 1
+            except Exception as exc:
+                failed.append((f.name, str(exc)))
+        return ok, failed
+
+    def weekly_report(self, days: int = 7) -> dict:
+        """最近 N 天的成交汇总，附带上一周期对比。"""
+        from datetime import datetime, timedelta
+
+        def parse(at):
+            if not at:
+                return None
+            try:
+                return datetime.fromisoformat(str(at)[:19])
+            except Exception:
+                return None
+
+        now = datetime.now()
+        start = now - timedelta(days=days)
+        prev_start = start - timedelta(days=days)
+
+        sold, added, photos = [], 0, 0
+        for row in self.list_products():
+            created = parse(row["created_at"])
+            if created and created >= start:
+                added += 1
+            for im in self.list_images(row["id"]):
+                t = parse(im["added_at"])
+                if t and t >= start:
+                    photos += 1
+            if (row["status"] or "") != "已售":
+                continue
+            when = None
+            for e in self.list_events(row["id"], 300):
+                if (e["kind"] or "") == "售出":
+                    when = parse(e["at"])
+                    break
+            when = when or parse(row["updated_at"])
+            if not when:
+                continue
+            price = _num(row["price"])
+            listed = self._listed_price(row["id"], price)
+            item = {"id": row["id"], "name": row["name"], "price": price,
+                    "listed": listed, "when": when.strftime("%m-%d"),
+                    "days": self.days_on_sale(row["id"]) or 0}
+            if when >= start:
+                sold.append(item)
+
+        prev = []
+        for row in self.list_products():
+            if (row["status"] or "") != "已售":
+                continue
+            when = None
+            for e in self.list_events(row["id"], 300):
+                if (e["kind"] or "") == "售出":
+                    when = parse(e["at"])
+                    break
+            when = when or parse(row["updated_at"])
+            if when and prev_start <= when < start:
+                prev.append(_num(row["price"]))
+
+        stale = []
+        for row in self.list_products():
+            if (row["status"] or "") in ("已售", "下架"):
+                continue
+            stale.append((self.days_on_sale(row["id"]), row["name"], _num(row["price"])))
+        stale.sort(reverse=True)
+
+        amount = sum(x["price"] for x in sold)
+        disc = [i for i in sold if i["listed"] > 0]
+        disc_rate = (sum((i["listed"] - i["price"]) / i["listed"] for i in disc) / len(disc) * 100
+                     if disc else 0)
+        return {"days": days, "sold": sold, "count": len(sold), "amount": amount,
+                "avg_days": (sum((x["days"] or 0) for x in sold) / len(sold) if sold else 0),
+                "avg_discount": disc_rate,
+                "prev_count": len(prev), "prev_amount": sum(prev),
+                "added": added, "photos": photos, "stale": stale[:3]}
+
     def duplicate_product(self, pid: int) -> int:
         """复制一条商品（含配图），状态回到草稿。"""
         row = self.get_product(pid)
