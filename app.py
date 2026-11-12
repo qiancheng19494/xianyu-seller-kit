@@ -1191,7 +1191,7 @@ class App(tk.Tk):
 
         self.lbl_time_head = ttk.Label(right, text="上架时间线", style="H2.TLabel")
         self.lbl_time_head.pack(anchor="w")
-        self.tv_time = ttk.Treeview(right, columns=("at", "kind", "note"), show="headings", height=7)
+        self.tv_time = ttk.Treeview(right, columns=("at", "kind", "note"), show="headings", height=4)
         for c, t, w, a in (("at", "时间", 108, "w"), ("kind", "动作", 56, "center"),
                            ("note", "说明", 200, "w")):
             self.tv_time.heading(c, text=t)
@@ -1209,12 +1209,12 @@ class App(tk.Tk):
 
         act2 = ttk.Frame(right, style="Card.TFrame")
         act2.pack(fill="x", pady=(8, 0))
-        ttk.Button(act2, text="载入到写文案", style="Accent.TButton",
+        ttk.Button(act2, text="载入到写文案", style="Accent.TButton", padding=(8, 5),
                    command=self.load_product).pack(side="left", fill="x", expand=True)
         ttk.Button(act2, text="发布清单", style="Ghost.TButton",
-                   command=self.export_listing).pack(side="left", padx=(8, 0))
+                   command=self.export_listing).pack(side="left", padx=(6, 0))
         ttk.Button(act2, text="素材包发群", style="Ghost.TButton",
-                   command=self.push_bundle).pack(side="left", padx=(8, 0))
+                   command=self.push_bundle).pack(side="left", padx=(6, 0))
         ttk.Button(act2, text="删除", style="Ghost.TButton",
                    command=self.delete_product).pack(side="right")
 
@@ -1727,7 +1727,7 @@ class App(tk.Tk):
         self.set_status(f"已导出 {n} 条到 {path}")
 
     # ------------------------------------------------------------ 详情：图片与时间线
-    def _photo(self, path: str, size: int = 84):
+    def _photo(self, path: str, size: int = 64):
         """尽量做缩略图：先试 Pillow（支持 jpg/webp），退回 tkinter 原生（png/gif）。"""
         try:
             from PIL import Image, ImageTk  # type: ignore
