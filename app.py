@@ -1132,6 +1132,7 @@ class App(tk.Tk):
         bulk_bar.pack(fill="x", pady=(0, 8))
         ttk.Label(bulk_bar, text="选中多行后：", style="Hint.TLabel").pack(side="left")
         for text, cmd in (("批量改价", self.bulk_price),
+                          ("积压降 5%", self.bulk_stale_cut),
                           ("批量在售", lambda: self.bulk_status("在售")),
                           ("批量下架", lambda: self.bulk_status("下架")),
                           ("复制副本", self.bulk_duplicate)):
@@ -1212,6 +1213,8 @@ class App(tk.Tk):
                    command=self.load_product).pack(side="left", fill="x", expand=True)
         ttk.Button(act2, text="发布清单", style="Ghost.TButton",
                    command=self.export_listing).pack(side="left", padx=(8, 0))
+        ttk.Button(act2, text="素材包发群", style="Ghost.TButton",
+                   command=self.push_bundle).pack(side="left", padx=(8, 0))
         ttk.Button(act2, text="删除", style="Ghost.TButton",
                    command=self.delete_product).pack(side="right")
 
@@ -1319,6 +1322,13 @@ class App(tk.Tk):
             messagebox.showinfo("比一比", res.get("msg", "先填数据"))
             return
         self.t_price.insert("end", "\n\n" + res["text"])
+        try:
+            self.store.add_rival_prices(self._detail_pid, [engine._num(x) for x in rivals])
+            tr = self.store.rival_trend(self._detail_pid)
+            if tr.get("batches", 0) >= 2:
+                self.t_price.insert("end", "\n\n" + engine.rival_trend_text(tr))
+        except Exception:
+            pass
         self.t_price.see("end")
 
     def push_weekly_qq(self):
@@ -1633,6 +1643,47 @@ class App(tk.Tk):
             self.store.duplicate_product(pid)
         self._refresh_products()
         self.set_status(f"已复制 {len(pids)} 件商品（状态为草稿）")
+
+    def bulk_stale_cut(self):
+        pids = self._selected_pids()
+        if not pids:
+            messagebox.showinfo("积压降 5%", "先在列表里选中商品。")
+            return
+        stale = [p for p in pids if (self.store.days_on_sale(p) or 0) >= 30]
+        if not stale:
+            messagebox.showinfo("积压降 5%", "选中的商品在售都不满 30 天，不用降。")
+            return
+        if not messagebox.askyesno("积压降 5%", "对 %d 件满 30 天的商品降价 5%%？" % len(stale)):
+            return
+        n = self.store.bulk_adjust_price(stale, "percent", -5)
+        self._refresh_products()
+        messagebox.showinfo("已完成", "降了 %d 件，改价都记进时间线了。" % n)
+
+    def push_bundle(self):
+        if not self._detail_pid:
+            messagebox.showinfo("素材包", "先选一件商品。")
+            return
+        row = self.store.get_product(self._detail_pid)
+        imgs = self.store.list_images(self._detail_pid)
+        grid = self._last_grid_path(this_pid=self._detail_pid)
+        text = engine.listing_text(row, imgs, grid)
+        if not messagebox.askyesno("素材包发群", "把发布清单发到机器人所在的群里？"):
+            return
+        try:
+            res = notify.push_qq(text)
+        except Exception as exc:
+            messagebox.showerror("发送失败", str(exc))
+            return
+        if res.get("ok"):
+            messagebox.showinfo("已发送", "清单已发到群里（%d 段）。" % res.get("chunks", 1))
+        else:
+            messagebox.showerror("发送失败", res.get("error", "未知错误"))
+
+    def _last_grid_path(self, this_pid=None):
+        import glob as _glob
+        pat = "grid_%s_*.png" % (this_pid or "*")
+        files = sorted(_glob.glob(str(Path(self.store.path).parent / "grid" / pat)))
+        return files[-1] if files else ""
 
     def bulk_price(self):
         pids = self._selected_pids()
@@ -2124,6 +2175,13 @@ class App(tk.Tk):
             self.v_orig.set("1299"); self.v_floor_in.set("")
             self.v_cat2.set("数码/耳机"); self.v_cond2.set("九五新（用过几次）")
             self.v_days.set("35"); self.do_price()
+        elif idx == 22:
+            self.theme_name = "light"; self.apply_theme()
+            self.nb.select(TAB_PRICE)
+            self.v_orig.set("1299"); self.v_cat2.set("数码/耳机")
+            self.v_cond2.set("九五新（用过几次）"); self.v_days.set("35")
+            self.v_rivals.set("620, 680, 700, 760")
+            self.do_price(); self.do_compare(); self.do_compare()
         elif idx == 21:
             self.theme_name = "light"; self.apply_theme()
             self.nb.select(TAB_PRICE)

@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.6.0"
+VERSION = "4.7.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -759,4 +759,14 @@ def weekly_markdown(r: dict, today: str = "") -> str:
         "",
         "> 数据来自本地商品库；降价/改价都记在那件商品的上架时间线里。",
     ]
+    return "\n".join(lines)
+
+
+def rival_trend_text(tr: dict) -> str:
+    pts = tr.get("points") or []
+    lines = ["竞品价格变化（第 1 次 → 第 %d 次比价）" % max(1, len(pts))]
+    for i, (_b, v) in enumerate(pts[-6:], 1):
+        lines.append("  第 %d 次：中位 %.0f 元" % (i, v))
+    if tr.get("verdict"):
+        lines.append(tr["verdict"])
     return "\n".join(lines)

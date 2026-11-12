@@ -79,3 +79,8 @@ _run*.err
 _run*.out
 _exe.*
 
+
+build12/
+dist12/
+_s*.py
+

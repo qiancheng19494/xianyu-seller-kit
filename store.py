@@ -110,6 +110,14 @@ class Store:
                 at TEXT DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_events_pid ON events(product_id, at);
+            CREATE TABLE IF NOT EXISTS rival_prices(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER,
+                price REAL,
+                batch INTEGER DEFAULT 1,
+                at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_rivals_pid ON rival_prices(product_id);
             CREATE INDEX IF NOT EXISTS idx_images_pid ON product_images(product_id);
             CREATE TABLE IF NOT EXISTS dict_words(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -321,6 +329,55 @@ class Store:
     def delete_phrase(self, pid: int) -> None:
         self.conn.execute("DELETE FROM phrases WHERE id=?", (pid,))
         self.conn.commit()
+
+    # ---------------- 竞品价格历史
+    def add_rival_prices(self, pid: int | None, prices: list[float]) -> int:
+        now = time.strftime("%Y-%m-%d %H:%M")
+        row = self.conn.execute("SELECT MAX(batch) AS b FROM rival_prices").fetchone()
+        batch = (row["b"] or 0) + 1
+        n = 0
+        for v in prices:
+            if v and v > 0:
+                self.conn.execute(
+                    "INSERT INTO rival_prices(product_id, price, batch, at) VALUES (?,?,?,?)",
+                    (pid, float(v), batch, now))
+                n += 1
+        self.conn.commit()
+        return n
+
+    def list_rival_prices(self, pid: int | None = None, limit: int = 200) -> list[sqlite3.Row]:
+        if pid is None:
+            return list(self.conn.execute(
+                "SELECT * FROM rival_prices ORDER BY id DESC LIMIT ?", (limit,)))
+        return list(self.conn.execute(
+            "SELECT * FROM rival_prices WHERE product_id=? ORDER BY id DESC LIMIT ?", (pid, limit)))
+
+    def rival_trend(self, pid: int | None = None, limit: int = 600) -> dict:
+        rows = self.list_rival_prices(pid, limit)
+        if not rows:
+            return {"rounds": 0, "batches": 0, "msg": "还没有竞品价格记录。"}
+        batches = {}
+        for r in rows:
+            b = r["batch"] or 1
+            batches.setdefault(b, []).append(r["price"])
+        order = sorted(batches)
+        med = []
+        for b in order:
+            vals = sorted(batches[b])
+            med.append((b, vals[len(vals) // 2]))
+        first, last = med[0][1], med[-1][1]
+        delta = (last - first) / first * 100 if first else 0
+        if len(med) < 2:
+            verdict = "只有一次记录，再比一次就能看出同行在涨还是在降。"
+        elif delta <= -3:
+            verdict = "同行在降价（%+.0f%%），可以跟一档，或者把成色/配件写细一点守住价格。" % delta
+        elif delta >= 3:
+            verdict = "同行在涨价（%+.0f%%），你的价格空间变大了，先别急着降。" % delta
+        else:
+            verdict = "同行价格基本没动（%+.0f%%），按现在的价走就行。" % delta
+        return {"rounds": len(rows), "batches": len(med),
+                "first": first, "last": last, "delta": delta,
+                "points": med, "verdict": verdict}
 
     def phrase_bank(self) -> dict[str, list[str]]:
         """转成 reply_for 需要的 {问题: [回答]} 结构。"""
