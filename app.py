@@ -23,7 +23,9 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import engine  # noqa: E402
-import store as store_mod  # noqa: E402
+import store as store_mod
+import notify
+  # noqa: E402
 import theme  # noqa: E402
 
 APP_NAME = "闲鱼卖家神器"
@@ -486,6 +488,14 @@ class App(tk.Tk):
                                height=16)
         self.t_price.pack(fill="both", expand=True)
 
+        cmp_bar = ttk.Frame(box)
+        cmp_bar.pack(fill="x", pady=(10, 0))
+        ttk.Label(cmp_bar, text="竞品价格（空格或逗号分隔）", style="Hint.TLabel").pack(side="left")
+        self.v_rivals = tk.StringVar()
+        ttk.Entry(cmp_bar, textvariable=self.v_rivals, width=28).pack(side="left", padx=8)
+        ttk.Button(cmp_bar, text="比一比", style="Ghost.TButton",
+                   command=self.do_compare).pack(side="left")
+
     # ------------------------------------------------------------ 页签 3：回买家
     def _build_tab_reply(self):
         page = ttk.Frame(self.nb, padding=0)
@@ -606,6 +616,8 @@ class App(tk.Tk):
                    command=self._refresh_report).pack(side="right")
         ttk.Button(top, text="生成本周周报", style="Accent.TButton",
                    command=self.export_weekly).pack(side="right", padx=(0, 8))
+        ttk.Button(top, text="周报发 QQ", style="Ghost.TButton",
+                   command=self.push_weekly_qq).pack(side="right", padx=(0, 8))
 
         cards = ttk.Frame(wrap, style="Card.TFrame")
         cards.pack(fill="x", pady=(10, 12))
@@ -1105,6 +1117,17 @@ class App(tk.Tk):
         ttk.Button(filter_bar, text="搜索", style="Ghost.TButton",
                    command=self._refresh_products).pack(side="left")
 
+        self.v_pmin = tk.StringVar()
+        self.v_pmax = tk.StringVar()
+        self.v_days2 = tk.StringVar(value="不限")
+        ttk.Label(filter_bar, text="价格", style="Hint.TLabel").pack(side="left", padx=(14, 4))
+        ttk.Entry(filter_bar, textvariable=self.v_pmin, width=6).pack(side="left")
+        ttk.Label(filter_bar, text="–", style="Hint.TLabel").pack(side="left", padx=2)
+        ttk.Entry(filter_bar, textvariable=self.v_pmax, width=6).pack(side="left")
+        ttk.Label(filter_bar, text="在售", style="Hint.TLabel").pack(side="left", padx=(12, 4))
+        ttk.Combobox(filter_bar, textvariable=self.v_days2, state="readonly", width=9,
+                     values=["不限", "≤3 天", "4–14 天", "15–30 天", ">30 天"]).pack(side="left")
+
         bulk_bar = ttk.Frame(left, style="Card.TFrame")
         bulk_bar.pack(fill="x", pady=(0, 8))
         ttk.Label(bulk_bar, text="选中多行后：", style="Hint.TLabel").pack(side="left")
@@ -1288,6 +1311,30 @@ class App(tk.Tk):
         self.nb.select(TAB_MINE)
 
     # ------------------------------------------------------------ 动作：定价
+    def do_compare(self):
+        rivals = [x for x in re.split(r"[,\s、，]+", self.v_rivals.get().strip()) if x]
+        mine = self.v_orig.get().strip() or "0"
+        res = engine.compare_prices(mine, rivals)
+        if not res.get("ok"):
+            messagebox.showinfo("比一比", res.get("msg", "先填数据"))
+            return
+        self.t_price.insert("end", "\n\n" + res["text"])
+        self.t_price.see("end")
+
+    def push_weekly_qq(self):
+        text = engine.weekly_markdown(self.store.weekly_report(7))
+        if not messagebox.askyesno("发到 QQ", "把这份周报发到机器人所在的群里？"):
+            return
+        try:
+            res = notify.push_qq(text)
+        except Exception as exc:
+            messagebox.showerror("发送失败", str(exc))
+            return
+        if res.get("ok"):
+            messagebox.showinfo("已发送", "周报已发到群里（%d 段）。" % res.get("chunks", 1))
+        else:
+            messagebox.showerror("发送失败", res.get("error", "未知错误"))
+
     def do_price(self):
         res = engine.suggest_price(self.v_orig.get(), self.v_cat2.get(), self.v_cond2.get(),
                                    self.v_floor_in.get())
@@ -1481,7 +1528,18 @@ class App(tk.Tk):
     def _refresh_products(self):
         if not hasattr(self, "tv_prod"):
             return
-        rows = self.store.list_products(self.v_filter.get(), self.v_keyword.get().strip())
+        def _f(v, cast=float):
+            try:
+                return cast(v.get().strip()) if v.get().strip() else None
+            except ValueError:
+                return None
+
+        span = self.v_days2.get()
+        dmin, dmax = {"≤3 天": (None, 3), "4–14 天": (4, 14),
+                      "15–30 天": (15, 30), ">30 天": (31, None)}.get(span, (None, None))
+        rows = self.store.list_products(self.v_filter.get(), self.v_keyword.get().strip(),
+                                        min_price=_f(self.v_pmin), max_price=_f(self.v_pmax),
+                                        min_days=dmin, max_days=dmax)
         self.tv_prod.delete(*self.tv_prod.get_children())
         for r in rows:
             d = self.store.days_on_sale(r["id"])
@@ -2066,6 +2124,13 @@ class App(tk.Tk):
             self.v_orig.set("1299"); self.v_floor_in.set("")
             self.v_cat2.set("数码/耳机"); self.v_cond2.set("九五新（用过几次）")
             self.v_days.set("35"); self.do_price()
+        elif idx == 21:
+            self.theme_name = "light"; self.apply_theme()
+            self.nb.select(TAB_PRICE)
+            self.v_orig.set("1299"); self.v_cat2.set("数码/耳机")
+            self.v_cond2.set("九五新（用过几次）"); self.v_days.set("35")
+            self.v_rivals.set("620, 700, 880, 1050")
+            self.do_price(); self.do_compare()
         elif idx == 19:
             self.theme_name = "light"; self.apply_theme()
             self.v_chk_title.set("AirPods Pro 2 国行 | 九五新 | 自用闲置")

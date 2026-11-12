@@ -1,4 +1,4 @@
-# 闲鱼卖家神器 v4.5
+# 闲鱼卖家神器 v4.6
 
 > 写文案、定价、回买家、发布体检（一键修复）、看报表、管商品（配图 + 上架时间线 + 九宫格图）、批量生成——闲鱼卖家的七件套，
 > 一个桌面小工具全搞定。浅色/深色主题可切。
@@ -7,7 +7,7 @@
 
 ## 下载即用（Windows，无需装 Python）
 
-去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v4.5.0_win64.zip`：
+去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v4.6.0_win64.zip`：
 
 1. 解压得到 `闲鱼卖家神器` 文件夹
 2. 双击里面的 `闲鱼卖家神器.exe`
@@ -43,6 +43,25 @@
 右上角「深色 / 浅色」一点即切，选择会记住。
 
 ![深色主题](ui-v4-dark.png)
+
+## v4.6 更新了什么
+
+- **周报一键发 QQ**：报表页「周报发 QQ」，直接把周报推到机器人所在的群（走本机 roost，不用装任何东西）。
+- **竞品比价**：定价格页填一串同行价格，「比一比」给出中位价、你贵/便宜多少、偏低/合理/偏高与建议。
+- **商品库筛选升级**：价格区间 + 在售天数（≤3 天 / 4–14 / 15–30 / >30 天）组合筛选，找积压货不用再翻列表。
+
+![竞品比价](ui-v46-price.png)
+
+![商品库筛选](ui-v46-mine.png)
+
+定时推送：仓库里的 `notify.py` 可以直接被系统计划任务调用：
+
+```bat
+cd /d %~dp0
+py notify.py
+```
+
+（`py notify.py --dry` 只生成不发送；需要机器人先在线、群里有记录。）
 
 ## v4.5 更新了什么
 
@@ -139,7 +158,7 @@ Kindle Paperwhite 4, 数码, 九成新, 320, 看书神器、送保护套
 ```bash
 pip install pyinstaller
 python -m PyInstaller --noconfirm --clean --onedir --windowed --name 闲鱼卖家神器 \
-  --distpath dist10 --workpath build10 --specpath build8 app.py
+  --distpath dist11 --workpath build11 --specpath build8 app.py
 ```
 
 产物在 `dist5/闲鱼卖家神器/`，整个文件夹拷给没装 Python 的电脑即可。

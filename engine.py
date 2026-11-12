@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.5.0"
+VERSION = "4.6.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -178,7 +178,7 @@ def gen_copy(name: str, category: str, condition: str, points: str,
 
 def _num(text: str) -> float:
     try:
-        return float(re.sub(r"[^\d.]", "", text or ""))
+        return float(re.sub(r"[^\d.]", "", str(text or "")))
     except Exception:
         return 0.0
 
@@ -667,3 +667,96 @@ def price_range(orig, category: str, condition: str, days: int = 0, floor: float
     ]
     return {"ok": True, "low": low, "high": high, "mid": r10(mid), "deal": deal, "days": days,
             "text": "\n".join(lines)}
+
+
+def compare_prices(my_price, others) -> dict:
+    """把自己的挂牌价和一串竞品价格比一比。"""
+    mine = _num(my_price)
+    prices = sorted(x for x in (_num(o) for o in others) if x > 0)
+    if not mine:
+        return {"ok": False, "msg": "先填自己的挂牌价。"}
+    if not prices:
+        return {"ok": False, "msg": "至少贴一个竞品价格，比如：480 520 560。"}
+
+    n = len(prices)
+    med = prices[n // 2] if n % 2 else (prices[n // 2 - 1] + prices[n // 2]) / 2
+    lo, hi = prices[0], prices[-1]
+    diff = (mine - med) / med * 100 if med else 0
+    lower = sum(1 for p in prices if p < mine)
+
+    if diff <= -12:
+        verdict = "偏低：你比中位价便宜 %.0f%%，出手快但可能贱卖。" % abs(diff)
+        advice = "可以往上提 5–8%%，或者把「急出」去掉，别把自己定价定成清仓。"
+    elif diff >= 15:
+        verdict = "偏高：你比中位价贵 %.0f%%，容易挂着没人问。" % diff
+        advice = "要么降到接近中位价，要么把差异写清楚（配件全、成色好、有保修）。"
+    else:
+        verdict = "合理：和中位价差 %.0f%%，属于正常区间。" % diff
+        advice = "保持这个价，多准备两张细节图，比降价更有用。"
+
+    lines = [
+        "竞品比价",
+        "=" * 30,
+        "你的挂牌价：%d 元" % mine,
+        "竞品 %d 个：%s" % (n, "、".join("%d" % p for p in prices)),
+        "最低 %d / 中位 %d / 最高 %d 元" % (lo, med, hi),
+        "比你便宜的竞品：%d 个" % lower,
+        "",
+        verdict,
+        "建议：" + advice,
+    ]
+    return {"ok": True, "median": med, "diff": diff, "lower": lower,
+            "low": lo, "high": hi, "text": "\n".join(lines)}
+
+
+def weekly_markdown(r: dict, today: str = "") -> str:
+    """把 weekly_report() 的结果渲染成 Markdown 周报。"""
+    import time as _t
+    today = today or _t.strftime("%Y-%m-%d")
+    lines = [
+        "# 卖货周报 · %s" % today,
+        "",
+        "统计口径：最近 %d 天（含今天）。" % r.get("days", 7),
+        "",
+        "## 本周成交",
+        "",
+        "| 商品 | 成交价 | 挂牌价 | 在售天数 | 售出 |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
+    if r["sold"]:
+        for it in r["sold"]:
+            lines.append("| %s | ¥%.0f | ¥%.0f | %d 天 | %s |"
+                         % (it["name"], it["price"], it["listed"], it["days"] or 0, it["when"]))
+    else:
+        lines.append("| 本周没有成交 | — | — | — | — |")
+    lines += [
+        "",
+        "**本周成交额 ¥%.0f，共 %d 件；上周 %d 件 / ¥%.0f。**"
+        % (r["amount"], r["count"], r["prev_count"], r["prev_amount"]),
+        "",
+        "## 关键数字",
+        "",
+        "- 平均在售天数：%.1f 天" % r["avg_days"],
+        "- 平均让价：%.0f%%（挂牌 → 成交）" % r["avg_discount"],
+        "- 本周新增商品：%d 件；新增配图：%d 张" % (r["added"], r["photos"]),
+        "",
+        "## 卡住的货（最久没卖掉的）",
+        "",
+    ]
+    if r["stale"]:
+        for days, name, price in r["stale"]:
+            lines.append("- %s（挂了 %d 天，标价 ¥%.0f）" % (name, days or 0, price))
+        lines += ["", "建议：挂了 30 天以上还没动静，先把标价调到区间下限，标题补「可小刀」。"]
+    else:
+        lines.append("- 没有积压，清得不错。")
+    lines += [
+        "",
+        "## 下周做什么",
+        "",
+        "1. 把上面「卡住的货」各降一档，配 3 张新实拍图重新发一次。",
+        "2. 成交过的品类可以再收一件同类型，好卖的先堆量。",
+        "3. 新上的货记得走一遍「发布体检」，别因为措辞被限流。",
+        "",
+        "> 数据来自本地商品库；降价/改价都记在那件商品的上架时间线里。",
+    ]
+    return "\n".join(lines)

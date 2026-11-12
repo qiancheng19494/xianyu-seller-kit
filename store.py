@@ -168,7 +168,8 @@ class Store:
         self.conn.execute(f"UPDATE products SET {keys} WHERE id=?", (*fields.values(), pid))
         self.conn.commit()
 
-    def list_products(self, status: str = "", keyword: str = "") -> list[sqlite3.Row]:
+    def list_products(self, status: str = "", keyword: str = "", min_price=None,
+                      max_price=None, min_days=None, max_days=None) -> list[sqlite3.Row]:
         sql, args = "SELECT * FROM products WHERE 1=1", []
         if status and status != "全部":
             sql += " AND status=?"
@@ -176,8 +177,25 @@ class Store:
         if keyword:
             sql += " AND (name LIKE ? OR title LIKE ?)"
             args += [f"%{keyword}%", f"%{keyword}%"]
+        if min_price is not None:
+            sql += " AND price >= ?"
+            args.append(min_price)
+        if max_price is not None:
+            sql += " AND price <= ?"
+            args.append(max_price)
         sql += " ORDER BY updated_at DESC, id DESC"
-        return list(self.conn.execute(sql, args))
+        rows = list(self.conn.execute(sql, args))
+        if min_days is None and max_days is None:
+            return rows
+        out = []
+        for row in rows:
+            days = self.days_on_sale(row["id"]) or 0
+            if min_days is not None and days < min_days:
+                continue
+            if max_days is not None and days > max_days:
+                continue
+            out.append(row)
+        return out
 
     def get_product(self, pid: int):
         return self.conn.execute("SELECT * FROM products WHERE id=?", (pid,)).fetchone()

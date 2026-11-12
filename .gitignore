@@ -69,3 +69,13 @@ ui-v44-photo.jpg
 
 build10/
 dist10/
+
+build11/
+dist11/
+_r*.py
+ui-v46-exe.png
+_tmp/
+_run*.err
+_run*.out
+_exe.*
+
