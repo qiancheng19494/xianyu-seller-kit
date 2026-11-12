@@ -1,4 +1,4 @@
-# 闲鱼卖家神器 v4.7
+# 闲鱼卖家神器 v4.8
 
 > 写文案、定价、回买家、发布体检（一键修复）、看报表、管商品（配图 + 上架时间线 + 九宫格图）、批量生成——闲鱼卖家的七件套，
 > 一个桌面小工具全搞定。浅色/深色主题可切。
@@ -7,7 +7,7 @@
 
 ## 下载即用（Windows，无需装 Python）
 
-去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v4.7.0_win64.zip`：
+去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v4.8.0_win64.zip`：
 
 1. 解压得到 `闲鱼卖家神器` 文件夹
 2. 双击里面的 `闲鱼卖家神器.exe`
@@ -43,6 +43,14 @@
 右上角「深色 / 浅色」一点即切，选择会记住。
 
 ![深色主题](ui-v4-dark.png)
+
+## v4.8 更新了什么
+
+- **素材包连图一起发**：素材包发群时，除了发布清单文字，还会把最新的九宫格图一起发到群里（走 QQ 媒体上传，file_type=1）。
+- **阶梯降价**：批量条按钮改成「积压降价」，满 60 天降 10%、满 30 天降 5%，两个档位一次执行，改价逐条记进时间线。
+- **同行价格走势**：报表右栏新增折线，把每次「比一比」记下的中位价连起来，直接看同行在降还是在涨。
+
+![同行价格走势与报表](ui-v48-report.png)
 
 ## v4.7 更新了什么
 
@@ -168,7 +176,7 @@ Kindle Paperwhite 4, 数码, 九成新, 320, 看书神器、送保护套
 ```bash
 pip install pyinstaller
 python -m PyInstaller --noconfirm --clean --onedir --windowed --name 闲鱼卖家神器 \
-  --distpath dist12 --workpath build12 --specpath build8 app.py
+  --distpath dist13 --workpath build13 --specpath build8 app.py
 ```
 
 产物在 `dist5/闲鱼卖家神器/`，整个文件夹拷给没装 Python 的电脑即可。

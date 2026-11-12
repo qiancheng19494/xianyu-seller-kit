@@ -76,6 +76,36 @@ def push_qq(text: str) -> dict:
     return {"ok": True, "group": gid, "chunks": len(_split(text, 900))}
 
 
+def push_image(path: str) -> dict:
+    """把一张图发到群里（uploadMedia → sendGroup msg_type 7）。"""
+    import base64
+    import mimetypes
+    from pathlib import Path as _P
+
+    fp = _P(path)
+    if not fp.exists():
+        return {"ok": False, "error": "图片不存在：%s" % path}
+    status = _get("/api/status")
+    if not status.get("connected"):
+        return {"ok": False, "error": "机器人不在线（roost state=%s）" % status.get("state")}
+    gid = group_openid()
+    if not gid:
+        return {"ok": False, "error": "没找到群 openid"}
+
+    data = base64.b64encode(fp.read_bytes()).decode("ascii")
+    up = _post("/api/qq/call", {"method": "uploadMedia",
+                                "args": {"__target": "group", "__rest": [gid],
+                                         "fileType": 1, "fileData": data}}, timeout=60)
+    info = (up or {}).get("result") or (up or {})
+    if not isinstance(info, dict) or not info.get("file_info"):
+        return {"ok": False, "error": "上传失败：%s" % str(up)[:200]}
+    up = {"file_info": info["file_info"]}
+    res = _post("/api/qq/call", {"method": "sendGroup",
+                                 "args": {"__target": gid, "content": " ",
+                                          "msg_type": 7, "media": {"file_info": up["file_info"]}}})
+    return {"ok": True, "group": gid, "sent": str(res)[:160]}
+
+
 def _split(text: str, size: int) -> list[str]:
     out, buf = [], ""
     for line in text.splitlines(True):

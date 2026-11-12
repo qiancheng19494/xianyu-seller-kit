@@ -640,8 +640,8 @@ class App(tk.Tk):
         self.rep_canvas = tk.Canvas(left, bg=CARD, highlightthickness=0, height=150)
         self.rep_canvas.pack(fill="both", expand=True, pady=(6, 10))
         ttk.Label(left, text="成交价 vs 挂牌价", style="H2.TLabel").pack(anchor="w")
-        self.rep_cmp = tk.Canvas(left, bg=CARD, highlightthickness=0, height=150)
-        self.rep_cmp.pack(fill="both", expand=True, pady=(6, 0))
+        self.rep_cmp = tk.Canvas(left, bg=CARD, highlightthickness=0, height=110)
+        self.rep_cmp.pack(fill="x", expand=False, pady=(6, 0))
 
         right = self.card(mid)
         right.pack(side="left", fill="both", expand=True)
@@ -652,6 +652,10 @@ class App(tk.Tk):
                         ("on", "在售", 60), ("amount", "成交额", 90)):
             self.tv_cat.heading(c, text=t)
             self.tv_cat.column(c, width=w, anchor="w" if c == "cat" else "e")
+        self.rep_rival = tk.Canvas(right, bg=CARD, highlightthickness=0, height=120)
+        self.rep_rival.pack(side="bottom", fill="x", pady=(4, 0))
+        ttk.Label(right, text="同行价格走势（每次比一比记一笔）", style="Hint.TLabel").pack(
+            side="bottom", anchor="w", pady=(10, 0))
         self.tv_cat.pack(fill="both", expand=True, pady=(8, 0))
 
         ttk.Label(wrap, text="口径：成交额按「售出」时间归月；在售天数从首次上架算到售出；"
@@ -671,6 +675,7 @@ class App(tk.Tk):
 
         self._draw_bars(rep["monthly"])
         self._draw_compare(self.store.sale_compare())
+        self._draw_rival()
 
     def export_weekly(self):
         """生成本周复盘周报（Markdown），存 data/reports 并复制到剪贴板。"""
@@ -732,6 +737,49 @@ class App(tk.Tk):
         self.set_status("周报已生成：%s" % out.name)
         if messagebox.askyesno(APP_NAME, "周报已保存到 data/reports 并复制到剪贴板。\n要打开看看吗？"):
             self._open_path(str(out))
+
+    def _draw_rival(self):
+        cv = self.rep_rival
+        cv.delete("all")
+        w = cv.winfo_width()
+        if w < 80:
+            w = 460
+            cv.after(80, self._draw_rival)
+        h = cv.winfo_height() or 110
+        tr = self.store.rival_trend(None)
+        pts = tr.get("points") or []
+        if len(pts) < 2:
+            cv.create_text(w // 2, h // 2, text="多比几次价，就能看到同行价格的走势",
+                           fill=SUB, font=(FONT, 9))
+            return
+        pad_l, pad_r, pad_t, pad_b = 46, 12, 14, 20
+        vals = [v for _b, v in pts]
+        lo, hi = min(vals), max(vals)
+        if hi - lo < 1:
+            lo, hi = lo * 0.95, hi * 1.05
+        span = hi - lo
+        lo, hi = max(0, lo - span * 0.15), hi + span * 0.15
+
+        def xy(i, v):
+            x = pad_l + (w - pad_l - pad_r) * (i / max(1, len(pts) - 1))
+            y = pad_t + (h - pad_t - pad_b) * (1 - (v - lo) / (hi - lo))
+            return x, y
+
+        for k in range(3):
+            v = lo + (hi - lo) * k / 2
+            _, y = xy(0, v)
+            cv.create_line(pad_l - 4, y, w - pad_r, y, fill=LINE)
+            cv.create_text(pad_l - 8, y, text="%.0f" % v, fill=GREY, anchor="e", font=(FONT, 8))
+
+        coords = []
+        for i, (_b, v) in enumerate(pts):
+            coords += list(xy(i, v))
+        cv.create_line(*coords, fill=ACCENT_DARK, width=2)
+        for i, (_b, v) in enumerate(pts):
+            x, y = xy(i, v)
+            cv.create_oval(x - 3, y - 3, x + 3, y + 3, fill=ACCENT_DARK, outline="")
+        cv.create_text(w - pad_r, pad_t - 4, text="%+.0f%%" % tr.get("delta", 0),
+                       fill=SUB, anchor="e", font=(FONT, 8))
 
     def _draw_compare(self, points: list):
         """成交价（实线）/ 挂牌价（虚线）按月折线。"""
@@ -1649,15 +1697,26 @@ class App(tk.Tk):
         if not pids:
             messagebox.showinfo("积压降 5%", "先在列表里选中商品。")
             return
-        stale = [p for p in pids if (self.store.days_on_sale(p) or 0) >= 30]
-        if not stale:
-            messagebox.showinfo("积压降 5%", "选中的商品在售都不满 30 天，不用降。")
+        detail = []
+        for days_need, pct in ((60, -10), (30, -5)):
+            taken = {p for p, _ in detail}
+            group = [p for p in pids if p not in taken and (self.store.days_on_sale(p) or 0) >= days_need]
+            detail += [(p, pct) for p in group]
+        if not detail:
+            messagebox.showinfo("积压降价", "选中的商品在售都不满 30 天，不用降。")
             return
-        if not messagebox.askyesno("积压降 5%", "对 %d 件满 30 天的商品降价 5%%？" % len(stale)):
+        parts = []
+        for pct in sorted({pp for _p, pp in detail}):
+            parts.append("降 %d%% 的 %d 件" % (-pct, sum(1 for _p, pp in detail if pp == pct)))
+        summary = "，".join(parts)
+        if not messagebox.askyesno("积压降价", "按阶梯降价（满 60 天 -10%%、满 30 天 -5%%）：%s。执行？" % summary):
             return
-        n = self.store.bulk_adjust_price(stale, "percent", -5)
+        n = 0
+        for pct in sorted({pp for _p, pp in detail}, reverse=True):
+            ids = [p for p, pp in detail if pp == pct]
+            n += self.store.bulk_adjust_price(ids, "percent", pct)
         self._refresh_products()
-        messagebox.showinfo("已完成", "降了 %d 件，改价都记进时间线了。" % n)
+        messagebox.showinfo("已完成", "%s，共 %d 件；改价都记进时间线了。" % (summary, n))
 
     def push_bundle(self):
         if not self._detail_pid:
@@ -1674,8 +1733,15 @@ class App(tk.Tk):
         except Exception as exc:
             messagebox.showerror("发送失败", str(exc))
             return
+        extra = ""
+        if res.get("ok") and grid:
+            try:
+                img = notify.push_image(grid)
+                extra = "，九宫格图也发了" if img.get("ok") else "，图没发出去"
+            except Exception:
+                extra = "，图片发送失败"
         if res.get("ok"):
-            messagebox.showinfo("已发送", "清单已发到群里（%d 段）。" % res.get("chunks", 1))
+            messagebox.showinfo("已发送", "清单已发到群里（%d 段）%s。" % (res.get("chunks", 1), extra))
         else:
             messagebox.showerror("发送失败", res.get("error", "未知错误"))
 
