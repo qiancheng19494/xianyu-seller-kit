@@ -619,6 +619,9 @@ class App(tk.Tk):
         ttk.Button(top, text="周报发 QQ", style="Ghost.TButton",
                    command=self.push_weekly_qq).pack(side="right", padx=(0, 8))
 
+        self.lbl_advice = ttk.Label(wrap, text="", style="Hint.TLabel", wraplength=1080, justify="left")
+        self.lbl_advice.pack(anchor="w", pady=(2, 0))
+
         cards = ttk.Frame(wrap, style="Card.TFrame")
         cards.pack(fill="x", pady=(10, 12))
         self.rep_boxes = {}
@@ -676,10 +679,24 @@ class App(tk.Tk):
         self._draw_bars(rep["monthly"])
         self._draw_compare(self.store.sale_compare())
         self._draw_rival()
+        try:
+            adv = self.store.stale_advice()
+            if adv:
+                names = "、".join("%s（降过%d次/%d天）" % (a["name"], a["drops"], a["days"]) for a in adv[:4])
+                self.lbl_advice.config(text="建议下架：" + names)
+            else:
+                self.lbl_advice.config(text="")
+        except Exception:
+            pass
 
     def export_weekly(self):
         """生成本周复盘周报（Markdown），存 data/reports 并复制到剪贴板。"""
         r = self.store.weekly_report(7)
+        try:
+            tr = self.store.rival_trend(None)
+            r["rival_text"] = engine.rival_trend_text(tr) if tr.get("batches", 0) >= 2 else ""
+        except Exception:
+            r["rival_text"] = ""
         today = time.strftime("%Y-%m-%d")
         lines = [
             "# 卖货周报 · %s" % today,
@@ -1725,7 +1742,11 @@ class App(tk.Tk):
         row = self.store.get_product(self._detail_pid)
         imgs = self.store.list_images(self._detail_pid)
         grid = self._last_grid_path(this_pid=self._detail_pid)
-        text = engine.listing_text(row, imgs, grid)
+        try:
+            zpath, text = notify.make_bundle(self._detail_pid)
+        except Exception as exc:
+            messagebox.showerror("打包失败", str(exc))
+            return
         if not messagebox.askyesno("素材包发群", "把发布清单发到机器人所在的群里？"):
             return
         try:
@@ -1734,12 +1755,12 @@ class App(tk.Tk):
             messagebox.showerror("发送失败", str(exc))
             return
         extra = ""
-        if res.get("ok") and grid:
+        if res.get("ok"):
             try:
-                img = notify.push_image(grid)
-                extra = "，九宫格图也发了" if img.get("ok") else "，图没发出去"
+                f = notify.push_file(zpath)
+                extra = "，素材包 zip 也发了" if f.get("ok") else "，zip 没发出去"
             except Exception:
-                extra = "，图片发送失败"
+                extra = "，zip 发送失败"
         if res.get("ok"):
             messagebox.showinfo("已发送", "清单已发到群里（%d 段）%s。" % (res.get("chunks", 1), extra))
         else:

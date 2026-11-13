@@ -106,6 +106,66 @@ def push_image(path: str) -> dict:
     return {"ok": True, "group": gid, "sent": str(res)[:160]}
 
 
+def make_bundle(pid: int) -> tuple[str, str]:
+    """把发布清单、九宫格、实拍图打成一个 zip，返回 (zip 路径, 清单文本)。"""
+    import glob
+    import zipfile
+    from pathlib import Path as _P
+
+    import engine
+    import store as _store
+
+    st = _store.Store()
+    row = st.get_product(pid)
+    imgs = st.list_images(pid)
+    grid_files = sorted(glob.glob(str(_P(st.path).parent / "grid" / ("grid_%d_*.png" % pid))))
+    grid = grid_files[-1] if grid_files else ""
+    text = engine.listing_text(row, imgs, grid)
+
+    out_dir = _P(st.path).parent / "bundles"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M")
+    zpath = out_dir / ("bundle_%d_%s.zip" % (pid, stamp))
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("发布清单.md", text)
+        if grid and _P(grid).exists():
+            zf.write(grid, "九宫格.png")
+        for i, im in enumerate(imgs[:8], 1):
+            fp = _P(im["path"])
+            if fp.exists():
+                zf.write(fp, "实拍图/%02d_%s" % (i, fp.name))
+    return str(zpath), text
+
+
+def push_file(path: str) -> dict:
+    """把文件发到群里（file_type=4）。"""
+    import base64
+    from pathlib import Path as _P
+
+    fp = _P(path)
+    if not fp.exists():
+        return {"ok": False, "error": "文件不存在：%s" % path}
+    status = _get("/api/status")
+    if not status.get("connected"):
+        return {"ok": False, "error": "机器人不在线"}
+    gid = group_openid()
+    if not gid:
+        return {"ok": False, "error": "没找到群 openid"}
+    data = base64.b64encode(fp.read_bytes()).decode("ascii")
+    up = _post("/api/qq/call", {"method": "uploadMedia",
+                                "args": {"__target": "group", "__rest": [gid],
+                                         "fileType": 4, "fileData": data,
+                                         "fileName": fp.name}}, timeout=120)
+    info = (up or {}).get("result") or (up or {})
+    if not isinstance(info, dict) or not info.get("file_info"):
+        return {"ok": False, "error": "上传失败：%s" % str(up)[:200]}
+    res = _post("/api/qq/call", {"method": "sendGroup",
+                                 "args": {"__target": gid, "content": " ",
+                                          "msg_type": 7,
+                                          "media": {"file_info": info["file_info"]}}})
+    return {"ok": True, "file": fp.name, "sent": str(res)[:120]}
+
+
 def _split(text: str, size: int) -> list[str]:
     out, buf = [], ""
     for line in text.splitlines(True):

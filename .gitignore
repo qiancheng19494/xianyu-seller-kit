@@ -89,3 +89,12 @@ build13/
 dist13/
 _t*.py
 
+
+build14/
+dist14/
+_u*.py
+_r*.err
+_r*.out
+_exe*.err
+_exe*.out
+

@@ -352,6 +352,22 @@ class Store:
         return list(self.conn.execute(
             "SELECT * FROM rival_prices WHERE product_id=? ORDER BY id DESC LIMIT ?", (pid, limit)))
 
+    def price_drop_count(self, pid: int) -> int:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM events WHERE product_id=? AND kind='改价'", (pid,)).fetchone()
+        return int(row["c"] if row else 0)
+
+    def stale_advice(self, min_drops: int = 3, min_days: int = 21) -> list[dict]:
+        out = []
+        for r in self.list_products("在售"):
+            days = self.days_on_sale(r["id"]) or 0
+            drops = self.price_drop_count(r["id"])
+            if days >= min_days and drops >= min_drops:
+                out.append({"id": r["id"], "name": r["name"], "price": r["price"],
+                            "days": days, "drops": drops})
+        out.sort(key=lambda it: (-it["drops"], -it["days"]))
+        return out
+
     def rival_trend(self, pid: int | None = None, limit: int = 600) -> dict:
         rows = self.list_rival_prices(pid, limit)
         if not rows:

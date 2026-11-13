@@ -20,6 +20,12 @@ class BITMAPINFO(ctypes.Structure):
     _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wt.DWORD * 3)]
 
 
+def _area(hwnd) -> int:
+    r = wt.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(r))
+    return max(0, r.right - r.left) * max(0, r.bottom - r.top)
+
+
 def find_hwnd(pid: int):
     found = []
 
@@ -36,6 +42,8 @@ def find_hwnd(pid: int):
         return True
 
     user32.EnumWindows(cb, 0)
+    # 优先挑最大的窗口（避免抓到同进程的控制台窗口）
+    found.sort(key=lambda it: _area(it[0]), reverse=True)
     return found
 
 

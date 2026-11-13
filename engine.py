@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.8.0"
+VERSION = "4.9.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -750,6 +750,10 @@ def weekly_markdown(r: dict, today: str = "") -> str:
     else:
         lines.append("- 没有积压，清得不错。")
     lines += [
+        "",
+        "## 同行价格变化",
+        "",
+        (r.get("rival_text") or "- 本周没有新的比价记录。"),
         "",
         "## 下周做什么",
         "",
