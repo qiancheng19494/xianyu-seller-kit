@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "4.9.0"
+VERSION = "5.0.0"
 
 # ---------------------------------------------------------------- 品类与成色
 

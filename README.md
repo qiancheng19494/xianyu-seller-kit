@@ -1,4 +1,4 @@
-# 闲鱼卖家神器 v4.9
+# 闲鱼卖家神器 v5.0
 
 > 写文案、定价、回买家、发布体检（一键修复）、看报表、管商品（配图 + 上架时间线 + 九宫格图）、批量生成——闲鱼卖家的七件套，
 > 一个桌面小工具全搞定。浅色/深色主题可切。
@@ -7,7 +7,7 @@
 
 ## 下载即用（Windows，无需装 Python）
 
-去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v4.9.0_win64.zip`：
+去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v5.0.0_win64.zip`：
 
 1. 解压得到 `闲鱼卖家神器` 文件夹
 2. 双击里面的 `闲鱼卖家神器.exe`
@@ -43,6 +43,16 @@
 右上角「深色 / 浅色」一点即切，选择会记住。
 
 ![深色主题](ui-v4-dark.png)
+
+## v5.0 更新了什么
+
+- **批量发素材包**：我的商品里多选若干件，一条命令把每件的素材包 zip 依次发到群里（一件一包，不混）。
+- **月目标**：设置窗口新增「月目标（元）」，概览页顶部直接显示「本月目标 ¥300：已卖 ¥261（87%）」，达标会标出来。
+- **月度表格导出**：报表页「导出本月」生成真正的 `.xlsx`（自带轻量写入器，不依赖 openpyxl），列：ID / 商品 / 品类 / 挂牌价 / 成交价 / 售出时间 / 在售天数 + 合计行。
+
+![概览与月目标](ui-v50-overview.png)
+
+![报表导出本月](ui-v50-report.png)
 
 ## v4.9 更新了什么
 
@@ -184,7 +194,7 @@ Kindle Paperwhite 4, 数码, 九成新, 320, 看书神器、送保护套
 ```bash
 pip install pyinstaller
 python -m PyInstaller --noconfirm --clean --onedir --windowed --name 闲鱼卖家神器 \
-  --distpath dist14 --workpath build14 --specpath build8 app.py
+  --distpath dist15 --workpath build15 --specpath build8 app.py
 ```
 
 产物在 `dist5/闲鱼卖家神器/`，整个文件夹拷给没装 Python 的电脑即可。

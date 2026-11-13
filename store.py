@@ -61,6 +61,56 @@ def data_dir() -> Path:
     raise RuntimeError("找不到可写的数据目录，请把程序放到有写权限的文件夹里再试。")
 
 
+def _xlsx_write(path: str, title: str, rows: list[list]):
+    """极简 .xlsx 写入：单表、inlineStr，Excel/WPS 都能打开。"""
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    def cell(v):
+        if isinstance(v, (int, float)):
+            return '<c t="n"><v>%s</v></c>' % v
+        return '<c t="inlineStr"><is><t xml:space="preserve">%s</t></is></c>' % escape(str(v or ""))
+
+    sheet_rows = []
+    for i, row in enumerate(rows, 1):
+        cells = "".join(cell(v) for v in row)
+        sheet_rows.append('<row r="%d">%s</row>' % (i, cells))
+    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+             '<sheetData>%s</sheetData></worksheet>' % "".join(sheet_rows))
+    wb = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+          '<sheets><sheet name="%s" sheetId="1" r:id="rId1"/></sheets></workbook>'
+          % escape(title[:31]))
+    rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+            'Target="worksheets/sheet1.xml"/></Relationships>')
+    ctypes = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+              '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+              '<Default Extension="xml" ContentType="application/xml"/>'
+              '<Override PartName="/xl/workbook.xml" '
+              'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+              '<Override PartName="/xl/worksheets/sheet1.xml" '
+              'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+              '</Types>')
+    root_rels = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                 '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                 '<Relationship Id="rId1" '
+                 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+                 'Target="xl/workbook.xml"/></Relationships>')
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", ctypes)
+        z.writestr("_rels/.rels", root_rels)
+        z.writestr("xl/workbook.xml", wb)
+        z.writestr("xl/_rels/workbook.xml.rels", rels)
+        z.writestr("xl/worksheets/sheet1.xml", sheet)
+    return path
+
+
 class Store:
     def __init__(self, path: str | Path | None = None):
         self.path = Path(path) if path else (data_dir() / "seller.db")
@@ -351,6 +401,42 @@ class Store:
                 "SELECT * FROM rival_prices ORDER BY id DESC LIMIT ?", (limit,)))
         return list(self.conn.execute(
             "SELECT * FROM rival_prices WHERE product_id=? ORDER BY id DESC LIMIT ?", (pid, limit)))
+
+    def monthly_rows(self, year: int, month: int) -> list[dict]:
+        """某个月卖掉的商品（按售出事件）。"""
+        prefix = "%04d-%02d" % (year, month)
+        out = []
+        for r in self.list_products():
+            t = self.sold_at(r["id"])
+            if t and t.startswith(prefix):
+                listed = self._listed_price(r["id"], r["price"]) if hasattr(self, "_listed_price") else r["price"]
+                out.append({"id": r["id"], "name": r["name"], "price": r["price"],
+                            "listed": listed, "category": r["category"], "sold_at": t,
+                            "days": self.days_on_sale(r["id"]) or 0})
+        out.sort(key=lambda it: it["sold_at"])
+        return out
+
+    def export_month_excel(self, path: str, year: int, month: int) -> str:
+        """导出月度表格（真 .xlsx，不依赖第三方库）。"""
+        data = self.monthly_rows(year, month)
+        rows = [["ID", "商品", "品类", "挂牌价", "成交价", "售出时间", "在售天数"]]
+        for r in data:
+            rows.append([r["id"], r["name"], r["category"], r["listed"],
+                         float(r["price"] or 0), r["sold_at"], r["days"]])
+        rows.append([])
+        rows.append(["合计", "", "", "", sum(float(r["price"] or 0) for r in data), "", ""])
+        if not path.lower().endswith(".xlsx"):
+            path += ".xlsx"
+        return _xlsx_write(path, "%d-%02d" % (year, month), rows)
+
+    def sold_at(self, pid: int) -> str:
+        row = self.conn.execute(
+            "SELECT at FROM events WHERE product_id=? AND kind='售出' ORDER BY id DESC LIMIT 1",
+            (pid,)).fetchone()
+        if row:
+            return row["at"] or ""
+        r = self.get_product(pid)
+        return (r["updated_at"] or "") if r and r["status"] == "已售" else ""
 
     def price_drop_count(self, pid: int) -> int:
         row = self.conn.execute(

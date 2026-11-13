@@ -281,6 +281,8 @@ class App(tk.Tk):
         top = self.card(wrap)
         top.pack(fill="x")
         ttk.Label(top, text="今天想卖点什么？", style="H1.TLabel").pack(anchor="w")
+        self.lbl_goal = ttk.Label(top, text="", style="Hint.TLabel")
+        self.lbl_goal.pack(anchor="w", pady=(2, 0))
         ttk.Label(top, text="四个数字先看一眼，再决定写文案还是体检。",
                   style="Hint.TLabel").pack(anchor="w", pady=(2, 14))
 
@@ -331,7 +333,27 @@ class App(tk.Tk):
         self.ov_tips.insert("1.0", TIPS_TEXT)
         self.ov_tips.config(state="disabled")
 
+    def _refresh_goal(self):
+        try:
+            goal = float(self.cfg.get("monthly_goal") or 0)
+        except Exception:
+            goal = 0.0
+        import time as _t
+        ym = _t.strftime("%Y-%m")
+        rep = self.store.sales_report()
+        cur = sum(v for k, v in rep["monthly"].items() if k == ym)
+        if goal > 0:
+            pct = min(100.0, cur / goal * 100)
+            self.lbl_goal.config(text="本月目标 ¥%.0f：已卖 ¥%.0f（%.0f%%）%s"
+                                 % (goal, cur, pct, "，达标了" if cur >= goal else ""))
+        else:
+            self.lbl_goal.config(text="本月已卖 ¥%.0f；设置里填「月目标」就能看进度。" % cur)
+
     def _refresh_overview(self):
+        try:
+            self._refresh_goal()
+        except Exception:
+            pass
         if not hasattr(self, "tv_recent"):
             return
         s = self.store.stats()
@@ -616,6 +638,8 @@ class App(tk.Tk):
                    command=self._refresh_report).pack(side="right")
         ttk.Button(top, text="生成本周周报", style="Accent.TButton",
                    command=self.export_weekly).pack(side="right", padx=(0, 8))
+        ttk.Button(top, text="导出本月", style="Ghost.TButton",
+                   command=self.export_month).pack(side="right", padx=(0, 8))
         ttk.Button(top, text="周报发 QQ", style="Ghost.TButton",
                    command=self.push_weekly_qq).pack(side="right", padx=(0, 8))
 
@@ -688,6 +712,19 @@ class App(tk.Tk):
                 self.lbl_advice.config(text="")
         except Exception:
             pass
+
+    def export_month(self):
+        import time as _t
+        now = _t.localtime()
+        base = os.path.join(os.path.dirname(self.store.path), "reports")
+        os.makedirs(base, exist_ok=True)
+        name = "\u6708\u5ea6_%04d%02d" % (now.tm_year, now.tm_mon)
+        path = self.store.export_month_excel(os.path.join(base, name), now.tm_year, now.tm_mon)
+        if messagebox.askyesno("导出本月", "已导出：\n%s\n\n现在打开吗？" % path):
+            try:
+                os.startfile(path)
+            except Exception:
+                pass
 
     def export_weekly(self):
         """生成本周复盘周报（Markdown），存 data/reports 并复制到剪贴板。"""
@@ -1200,7 +1237,8 @@ class App(tk.Tk):
                           ("积压降 5%", self.bulk_stale_cut),
                           ("批量在售", lambda: self.bulk_status("在售")),
                           ("批量下架", lambda: self.bulk_status("下架")),
-                          ("复制副本", self.bulk_duplicate)):
+                          ("复制副本", self.bulk_duplicate),
+                          ("批量发素材包", self.bulk_bundle)):
             ttk.Button(bulk_bar, text=text, style="Ghost.TButton",
                        command=cmd).pack(side="left", padx=(8, 0))
 
@@ -1709,6 +1747,29 @@ class App(tk.Tk):
         self._refresh_products()
         self.set_status(f"已复制 {len(pids)} 件商品（状态为草稿）")
 
+    def bulk_bundle(self):
+        pids = self._selected_pids()
+        if not pids:
+            messagebox.showinfo("批量发素材包", "先在列表里选中商品。")
+            return
+        if not messagebox.askyesno("批量发素材包",
+                                   "把选中的 %d 件商品各发一套素材包到群里？" % len(pids)):
+            return
+        ok, fail = 0, []
+        for pid in pids:
+            try:
+                zpath, text = notify.make_bundle(pid)
+                r1 = notify.push_qq(text)
+                r2 = notify.push_file(zpath)
+                if r1.get("ok") and r2.get("ok"):
+                    ok += 1
+                else:
+                    fail.append(str(pid))
+            except Exception as exc:
+                fail.append("%s(%s)" % (pid, exc))
+        messagebox.showinfo("批量发素材包",
+                            "成功 %d 件%s" % (ok, "" if not fail else "，失败：" + "、".join(fail)))
+
     def bulk_stale_cut(self):
         pids = self._selected_pids()
         if not pids:
@@ -2138,7 +2199,7 @@ class App(tk.Tk):
     def open_settings(self):
         win = tk.Toplevel(self)
         win.title("设置")
-        win.geometry("560x320")
+        win.geometry("560x390")
         win.configure(bg=BG)
         ttk.Label(win, text="DeepSeek API（可选，留空就用本地引擎）",
                   background=BG, font=(FONT, 11, "bold")).pack(anchor="w", padx=16, pady=(16, 8))
@@ -2148,13 +2209,20 @@ class App(tk.Tk):
         v_key = tk.StringVar(value=self.cfg.get("api_key", ""))
         v_url = tk.StringVar(value=self.cfg.get("base_url", "https://api.deepseek.com"))
         v_model = tk.StringVar(value=self.cfg.get("model", "deepseek-chat"))
-        for i, (label, var) in enumerate((("API Key", v_key), ("Base URL", v_url), ("模型", v_model))):
+        v_goal = tk.StringVar(value=str(self.cfg.get("monthly_goal") or ""))
+        for i, (label, var) in enumerate((("API Key", v_key), ("Base URL", v_url), ("模型", v_model),
+                                          ("月目标（元）", v_goal))):
             ttk.Label(form, text=label, width=10).grid(row=i, column=0, sticky="w", pady=6)
             ttk.Entry(form, textvariable=var, width=46).grid(row=i, column=1, sticky="w")
 
         def save():
+            try:
+                goal = float(v_goal.get().strip() or 0)
+            except ValueError:
+                goal = 0.0
             self.cfg.update({"api_key": v_key.get().strip(), "base_url": v_url.get().strip(),
-                             "model": v_model.get().strip() or "deepseek-chat"})
+                             "model": v_model.get().strip() or "deepseek-chat",
+                             "monthly_goal": goal})
             save_config(self.cfg)
             self._update_mode_label()
             self.set_status("设置已保存")
