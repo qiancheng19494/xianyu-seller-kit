@@ -89,6 +89,25 @@ TIPS_TEXT = """1. 图片一定要实拍，别用网图，闲鱼对盗图很敏�
 
 # ---------------------------------------------------------------- 配置
 
+
+def _draw_collage(paths, cols: int, rows: int, border: bool = True):
+    """把实拍图拼成 cols×rows 的方图；图不够就重复用。"""
+    from PIL import Image
+    S = 340
+    gap = 10 if border else 0
+    pad = 10 if border else 0
+    W = cols * S + (cols - 1) * gap + pad * 2
+    H = rows * S + (rows - 1) * gap + pad * 2
+    canvas = Image.new("RGB", (W, H), (255, 255, 255) if border else (245, 246, 248))
+    pics = [Image.open(p).convert("RGB") for p in paths]
+    k = 0
+    for r in range(rows):
+        for c in range(cols):
+            pic = _square(pics[k % len(pics)], S)
+            canvas.paste(pic, (pad + c * (S + gap), pad + r * (S + gap)))
+            k += 1
+    return canvas
+
 def config_path() -> str:
     return str(store_mod.data_dir() / "config.json")
 
@@ -344,8 +363,17 @@ class App(tk.Tk):
         cur = sum(v for k, v in rep["monthly"].items() if k == ym)
         if goal > 0:
             pct = min(100.0, cur / goal * 100)
+            reached = cur >= goal
             self.lbl_goal.config(text="本月目标 ¥%.0f：已卖 ¥%.0f（%.0f%%）%s"
-                                 % (goal, cur, pct, "，达标了" if cur >= goal else ""))
+                                 % (goal, cur, pct, "，达标了" if reached else ""))
+            if reached and self.cfg.get("goal_notified") != ym:
+                self.cfg["goal_notified"] = ym
+                save_config(self.cfg)
+                try:
+                    notify.push_qq("【达标】%s 卖了 ¥%.0f，超过目标 ¥%.0f，收工！"
+                                   % (ym, cur, goal))
+                except Exception:
+                    pass
         else:
             self.lbl_goal.config(text="本月已卖 ¥%.0f；设置里填「月目标」就能看进度。" % cur)
 
@@ -640,6 +668,8 @@ class App(tk.Tk):
                    command=self.export_weekly).pack(side="right", padx=(0, 8))
         ttk.Button(top, text="导出本月", style="Ghost.TButton",
                    command=self.export_month).pack(side="right", padx=(0, 8))
+        ttk.Button(top, text="月度小结发群", style="Ghost.TButton",
+                   command=self.push_month_summary).pack(side="right", padx=(0, 8))
         ttk.Button(top, text="周报发 QQ", style="Ghost.TButton",
                    command=self.push_weekly_qq).pack(side="right", padx=(0, 8))
 
@@ -712,6 +742,68 @@ class App(tk.Tk):
                 self.lbl_advice.config(text="")
         except Exception:
             pass
+
+    def set_cost_dialog(self):
+        if not self._detail_pid:
+            messagebox.showinfo("成本", "先在左边选一个商品。")
+            return
+        cur = self.store.get_product(self._detail_pid)
+        val = simpledialog.askstring("进货成本", "这件东西你花多少钱进的？（留空清除）",
+                                     initialvalue=(cur["cost"] or "") if "cost" in cur.keys() else "")
+        if val is None:
+            return
+        self.store.set_cost(self._detail_pid, val.strip())
+        self._show_detail()
+        self.set_status("成本已更新")
+
+    def make_collage(self):
+        if not self._detail_pid:
+            messagebox.showinfo("拼图", "先在左边选一个商品。")
+            return
+        win = tk.Toplevel(self)
+        win.title("拼图")
+        win.geometry("320x200")
+        win.configure(bg=BG)
+        ttk.Label(win, text="选一种拼图版式（用这件商品的实拍图）",
+                  style="H2.TLabel").pack(anchor="w", padx=16, pady=(14, 8))
+        rowf = ttk.Frame(win, padding=(16, 0))
+        rowf.pack(fill="x")
+        v_border = tk.BooleanVar(value=True)
+        for text, cols, rows in (("2×2", 2, 2), ("2×3", 2, 3), ("3×3", 3, 3)):
+            ttk.Button(rowf, text=text, style="Ghost.TButton",
+                       command=lambda c=cols, r=rows: (win.destroy(),
+                                                       self._do_collage(c, r, v_border.get()))
+                       ).pack(side="left", padx=(0, 8))
+        ttk.Checkbutton(win, text="加白边（8px）", variable=v_border).pack(anchor="w", padx=16, pady=10)
+
+    def _do_collage(self, cols: int, rows: int, border: bool = True):
+        imgs = [it["path"] for it in self.store.list_images(self._detail_pid, 24)]
+        if not imgs:
+            messagebox.showinfo("拼图", "这件商品还没有实拍图。")
+            return
+        im = _draw_collage(imgs, cols, rows, border)
+        d = os.path.join(os.path.dirname(self.store.path), "grid")
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, "collage_%d_%dx%d_%s.png"
+                            % (self._detail_pid, cols, rows, time.strftime("%Y%m%d_%H%M%S")))
+        im.save(path)
+        if messagebox.askyesno("拼图", "已生成：\n%s\n\n打开看看？" % path):
+            try:
+                os.startfile(path)
+            except Exception:
+                pass
+
+    def push_month_summary(self):
+        import time as _t
+        ym = _t.strftime("%Y-%m")
+        try:
+            goal = float(self.cfg.get("monthly_goal") or 0)
+        except Exception:
+            goal = 0.0
+        rep = self.store.sales_report()
+        text = engine.monthly_summary_text(rep, goal, ym)
+        r = notify.push_qq(text)
+        self.set_status("月度小结已发送" if r.get("ok") else "发送失败：" + str(r.get("error") or r))
 
     def export_month(self):
         import time as _t
@@ -1305,6 +1397,8 @@ class App(tk.Tk):
         act.pack(fill="x")
         ttk.Button(act, text="记一笔", style="Ghost.TButton",
                    command=self.add_note).pack(side="left")
+        ttk.Button(act, text="改成本", style="Ghost.TButton",
+                   command=self.set_cost_dialog).pack(side="left", padx=(8, 0))
         ttk.Button(act, text="标记在售", style="Ghost.TButton",
                    command=lambda: self.set_product_status("在售")).pack(side="left", padx=6)
         ttk.Button(act, text="标记已售", style="Ghost.TButton",
@@ -1318,6 +1412,8 @@ class App(tk.Tk):
                    command=self.export_listing).pack(side="left", padx=(6, 0))
         ttk.Button(act2, text="素材包发群", style="Ghost.TButton",
                    command=self.push_bundle).pack(side="left", padx=(6, 0))
+        ttk.Button(act2, text="拼图", style="Ghost.TButton", padding=(8, 5),
+                   command=self.make_collage).pack(side="left", padx=(6, 0))
         ttk.Button(act2, text="删除", style="Ghost.TButton",
                    command=self.delete_product).pack(side="right")
 
@@ -1951,8 +2047,14 @@ class App(tk.Tk):
                                       r["status"]] if x)
         self.lbl_det_meta.config(text=meta)
         d = self.store.days_on_sale(pid)
-        self.lbl_det_days.config(
-            text=(f"在售 {d} 天" if d is not None else "") + f"　更新于 {r['updated_at']}")
+        line = (f"在售 {d} 天" if d is not None else "") + f"　更新于 {r['updated_at']}"
+        try:
+            cost, price, gain = self.store.profit(pid)
+            if cost > 0:
+                line += f"　成本 ¥{cost:.0f}　毛利 ¥{gain:.0f}"
+        except Exception:
+            pass
+        self.lbl_det_days.config(text=line)
 
         imgs = self.store.list_images(pid)
         self.lbl_img_head.config(text=f"配图（{len(imgs)}）")

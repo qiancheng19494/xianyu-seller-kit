@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import re
 
-VERSION = "5.0.0"
+VERSION = "5.1.0"
 
 # ---------------------------------------------------------------- 品类与成色
 
@@ -773,4 +773,25 @@ def rival_trend_text(tr: dict) -> str:
         lines.append("  第 %d 次：中位 %.0f 元" % (i, v))
     if tr.get("verdict"):
         lines.append(tr["verdict"])
+    return "\n".join(lines)
+
+
+def monthly_summary_text(report: dict, goal: float = 0, ym: str = "") -> str:
+    """月度小结（给群里看的 Markdown 文本）。"""
+    amount = report.get("amount") or 0
+    count = report.get("count") or 0
+    lines = ["## %s 月度小结" % (ym or "本月"), ""]
+    lines.append("- 成交 %d 件，共 ¥%s" % (count, ("%.0f" % amount)))
+    if goal and goal > 0:
+        pct = min(100.0, amount / goal * 100)
+        lines.append("- 目标 ¥%.0f，完成 %.0f%%%s" % (goal, pct, "（达标）" if amount >= goal else ""))
+    cats = report.get("cats") or {}
+    if cats:
+        top = sorted(cats.items(), key=lambda kv: -(kv[1].get("amount") or 0))[:3]
+        lines.append("- 最能卖：" + "、".join("%s ¥%.0f" % (k, v.get("amount") or 0) for k, v in top))
+    avg = report.get("avg_days") or 0
+    if avg:
+        lines.append("- 平均在售 %.1f 天成交" % avg)
+    lines.append("")
+    lines.append("下个月继续加油。")
     return "\n".join(lines)

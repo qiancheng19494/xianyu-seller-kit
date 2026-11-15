@@ -118,6 +118,7 @@ class Store:
         self.conn = sqlite3.connect(str(self.path))
         self.conn.row_factory = sqlite3.Row
         self._init()
+        self._migrate_cost()
 
     # ------------------------------------------------------------ schema
     def _init(self):
@@ -136,6 +137,7 @@ class Store:
                 title TEXT DEFAULT '',
                 body TEXT DEFAULT '',
                 tags TEXT DEFAULT '',
+                cost TEXT DEFAULT '',
                 status TEXT DEFAULT '草稿',
                 created_at TEXT DEFAULT '',
                 updated_at TEXT DEFAULT ''
@@ -200,6 +202,12 @@ class Store:
                     (r["id"], "售出" if r["status"] == "已售" else r["status"],
                      "旧数据补录", r["updated_at"] or at))
         self.conn.commit()
+
+    def _migrate_cost(self):
+        cols = [r["name"] for r in self.conn.execute("PRAGMA table_info(products)")]
+        if "cost" not in cols:
+            self.conn.execute("ALTER TABLE products ADD COLUMN cost TEXT DEFAULT ''")
+            self.conn.commit()
 
     # ------------------------------------------------------------ products
     def save_product(self, p: dict) -> int:
@@ -327,6 +335,31 @@ class Store:
             return max(0, (d1 - d0).days)
         except Exception:
             return None
+
+    def set_cost(self, pid: int, cost) -> None:
+        self.conn.execute("UPDATE products SET cost=?, updated_at=? WHERE id=?",
+                          (str(cost or ""), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), pid))
+        self.conn.commit()
+
+    def profit(self, pid: int):
+        """(成本, 成交价或挂牌价, 毛利)。"""
+        r = self.get_product(pid)
+        if not r:
+            return (0.0, 0.0, 0.0)
+        keys = r.keys()
+        cost = _num(r["cost"]) if "cost" in keys else 0.0
+        price = _num(r["price"])
+        try:
+            at = self.sold_at(pid)
+            if at:
+                row = self.conn.execute(
+                    "SELECT note FROM events WHERE product_id=? AND kind='售出' ORDER BY id DESC LIMIT 1",
+                    (pid,)).fetchone()
+                p2 = _num((row["note"] or "") if row else "")
+                price = p2 or price
+        except Exception:
+            pass
+        return (cost, price, price - cost)
 
     def stats(self) -> dict:
         on_sale = self.conn.execute(

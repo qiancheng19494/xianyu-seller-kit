@@ -1,4 +1,4 @@
-# 闲鱼卖家神器 v5.0
+# 闲鱼卖家神器 v5.1
 
 > 写文案、定价、回买家、发布体检（一键修复）、看报表、管商品（配图 + 上架时间线 + 九宫格图）、批量生成——闲鱼卖家的七件套，
 > 一个桌面小工具全搞定。浅色/深色主题可切。
@@ -7,7 +7,7 @@
 
 ## 下载即用（Windows，无需装 Python）
 
-去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v5.0.0_win64.zip`：
+去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v5.1.0_win64.zip`：
 
 1. 解压得到 `闲鱼卖家神器` 文件夹
 2. 双击里面的 `闲鱼卖家神器.exe`
@@ -43,6 +43,13 @@
 右上角「深色 / 浅色」一点即切，选择会记住。
 
 ![深色主题](ui-v4-dark.png)
+
+## v5.1 更新了什么
+
+- **成本与毛利**：详情页「改成本」记进货价，详情行直接显示「成本 ¥200　毛利 ¥120」。
+- **目标达标报喜**：本月成交额越过月目标时，自动往群里发一条「【达标】…收工！」（每月只发一次）。
+- **月度小结发群**：报表页「月度小结发群」把成交件数、目标完成度、最能卖的品类、平均成交天数整理成一段发到群里。
+- **拼图**：详情页「拼图」支持 2×2 / 2×3 / 3×3，可加白边，用这件商品的实拍图自动拼（图不够会循环）。
 
 ## v5.0 更新了什么
 
@@ -194,7 +201,7 @@ Kindle Paperwhite 4, 数码, 九成新, 320, 看书神器、送保护套
 ```bash
 pip install pyinstaller
 python -m PyInstaller --noconfirm --clean --onedir --windowed --name 闲鱼卖家神器 \
-  --distpath dist15 --workpath build15 --specpath build8 app.py
+  --distpath dist16 --workpath build16 --specpath build8 app.py
 ```
 
 产物在 `dist5/闲鱼卖家神器/`，整个文件夹拷给没装 Python 的电脑即可。
