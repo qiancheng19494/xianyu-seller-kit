@@ -7,7 +7,7 @@
 
 ## 下载即用（Windows，无需装 Python）
 
-去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v5.1.0_win64.zip`：
+去 [Releases](https://github.com/qiancheng19494/xianyu-seller-kit/releases) 下载 `xianyu-seller-kit_v5.1.1_win64.zip`：
 
 1. 解压得到 `闲鱼卖家神器` 文件夹
 2. 双击里面的 `闲鱼卖家神器.exe`
@@ -43,6 +43,13 @@
 右上角「深色 / 浅色」一点即切，选择会记住。
 
 ![深色主题](ui-v4-dark.png)
+
+## v5.1.1 更新了什么
+
+- **详情面板不再被裁**：底部按钮改成三行（记一笔 / 成本 / 在售 / 已售、载入文案 / 清单 / 素材包、拼图 / 删除），默认窗口加宽到 1320×860，窄窗口下也能全部点到。
+- **换目录不再丢配图**：附带的 `_fix_paths.py` 可以把库里旧的绝对路径一次性改写到新位置（这次从 C 盘搬到 E 盘，7 张配图就是这么救回来的）。
+
+![详情面板 · 三行按钮](ui-moved.png)
 
 ## v5.1 更新了什么
 
@@ -201,7 +208,7 @@ Kindle Paperwhite 4, 数码, 九成新, 320, 看书神器、送保护套
 ```bash
 pip install pyinstaller
 python -m PyInstaller --noconfirm --clean --onedir --windowed --name 闲鱼卖家神器 \
-  --distpath dist16 --workpath build16 --specpath build8 app.py
+  --distpath dist17 --workpath build17 --specpath build17 app.py
 ```
 
 产物在 `dist5/闲鱼卖家神器/`，整个文件夹拷给没装 Python 的电脑即可。
