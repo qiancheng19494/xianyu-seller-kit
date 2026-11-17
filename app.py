@@ -161,8 +161,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"{APP_NAME} v{engine.VERSION}")
-        self.geometry("1180x820")
-        self.minsize(1000, 700)
+        self.geometry("1320x860")
+        self.minsize(1180, 760)
         self.configure(bg=BG)
 
         self.cfg = load_config()
@@ -1395,27 +1395,30 @@ class App(tk.Tk):
 
         act = ttk.Frame(right, style="Card.TFrame")
         act.pack(fill="x")
-        ttk.Button(act, text="记一笔", style="Ghost.TButton",
-                   command=self.add_note).pack(side="left")
-        ttk.Button(act, text="改成本", style="Ghost.TButton",
-                   command=self.set_cost_dialog).pack(side="left", padx=(8, 0))
-        ttk.Button(act, text="标记在售", style="Ghost.TButton",
-                   command=lambda: self.set_product_status("在售")).pack(side="left", padx=6)
-        ttk.Button(act, text="标记已售", style="Ghost.TButton",
-                   command=lambda: self.set_product_status("已售")).pack(side="left")
+        ttk.Button(act, text="记一笔", style="Ghost.TButton", padding=(6, 5),
+                   command=self.add_note).pack(side="left", fill="x", expand=True)
+        ttk.Button(act, text="成本", style="Ghost.TButton", padding=(6, 5),
+                   command=self.set_cost_dialog).pack(side="left", fill="x", expand=True, padx=(4, 0))
+        ttk.Button(act, text="在售", style="Ghost.TButton", padding=(6, 5),
+                   command=lambda: self.set_product_status("在售")).pack(side="left", fill="x", expand=True, padx=(4, 0))
+        ttk.Button(act, text="已售", style="Ghost.TButton", padding=(6, 5),
+                   command=lambda: self.set_product_status("已售")).pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         act2 = ttk.Frame(right, style="Card.TFrame")
         act2.pack(fill="x", pady=(8, 0))
-        ttk.Button(act2, text="载入到写文案", style="Accent.TButton", padding=(8, 5),
+        ttk.Button(act2, text="载入文案", style="Accent.TButton", padding=(8, 5),
                    command=self.load_product).pack(side="left", fill="x", expand=True)
-        ttk.Button(act2, text="发布清单", style="Ghost.TButton",
-                   command=self.export_listing).pack(side="left", padx=(6, 0))
-        ttk.Button(act2, text="素材包发群", style="Ghost.TButton",
-                   command=self.push_bundle).pack(side="left", padx=(6, 0))
-        ttk.Button(act2, text="拼图", style="Ghost.TButton", padding=(8, 5),
-                   command=self.make_collage).pack(side="left", padx=(6, 0))
-        ttk.Button(act2, text="删除", style="Ghost.TButton",
-                   command=self.delete_product).pack(side="right")
+        ttk.Button(act2, text="清单", style="Ghost.TButton", padding=(6, 5),
+                   command=self.export_listing).pack(side="left", padx=(4, 0))
+        ttk.Button(act2, text="素材包", style="Ghost.TButton", padding=(6, 5),
+                   command=self.push_bundle).pack(side="left", padx=(4, 0))
+
+        act3 = ttk.Frame(right, style="Card.TFrame")
+        act3.pack(fill="x", pady=(6, 0))
+        ttk.Button(act3, text="拼图", style="Ghost.TButton", padding=(6, 5),
+                   command=self.make_collage).pack(side="left", fill="x", expand=True)
+        ttk.Button(act3, text="删除", style="Ghost.TButton", padding=(6, 5),
+                   command=self.delete_product).pack(side="left", fill="x", expand=True, padx=(6, 0))
 
         self._thumbs: list = []
         self._detail_pid = None
